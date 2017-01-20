@@ -39,6 +39,8 @@
 #define XVIP_DMA_MAX_WIDTH		65535U
 #define XVIP_DMA_MIN_HEIGHT		1U
 #define XVIP_DMA_MAX_HEIGHT		8191U
+/* TODO: Infer multiplanar attribute from fourcc code */
+#define MULTIPLANAR
 
 /* -----------------------------------------------------------------------------
  * Helper functions
@@ -412,7 +414,11 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 
 	dma->xt.frame_size = 1;
 	dma->sgl[0].size = dma->format.width * dma->fmtinfo->bpp;
+#ifdef MULTIPLANAR
+	dma->sgl[0].icg = dma->format.bytesperline * dma->fmtinfo->bpp - dma->sgl[0].size;
+#else
 	dma->sgl[0].icg = dma->format.bytesperline - dma->sgl[0].size;
+#endif
 	dma->xt.numf = dma->format.height;
 
 	desc = dmaengine_prep_interleaved_dma(dma->dma, &dma->xt, flags);
@@ -662,6 +668,11 @@ xvip_dma_set_format(struct file *file, void *fh, struct v4l2_format *format)
 	dma->format = format->fmt.pix;
 	dma->fmtinfo = info;
 
+#ifdef MULTIPLANAR
+	dma->format.bytesperline = dma->format.bytesperline / info->bpp;
+	/* Calculate sizeimage for both planes */
+	dma->format.sizeimage = dma->format.sizeimage * info->bpp * 2;
+#endif
 	return 0;
 }
 

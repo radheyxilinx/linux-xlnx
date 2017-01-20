@@ -35,5 +35,6 @@
 #define XVIP_VF_CUSTOM2			13
 #define XVIP_VF_CUSTOM3			14
 #define XVIP_VF_CUSTOM4			15
+#define XVIP_VF_YUV_420_PLANAR		16
 
 #endif /* __DT_BINDINGS_MEDIA_XILINX_VIP_H__ */
