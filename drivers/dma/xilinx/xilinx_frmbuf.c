@@ -180,9 +180,9 @@ struct xilinx_frmbuf_format_desc {
 
 static const struct xilinx_frmbuf_format_desc xilinx_frmbuf_formats[] = {
 	{ "xlx1", 10, 4, "RGBX8 (RGB)",
-		DRM_FORMAT_RGBX8888, NULL},
+		DRM_FORMAT_RGBX8888, 0},
 	{ "xlx2", 11, 4, "YUVX8 (4:4:4)",
-		NULL, NULL},
+		0, 0},
 	{ "yuyv", 12, 2, "YUYV8 (4:2:2)",
 		DRM_FORMAT_YUYV, V4L2_PIX_FMT_YUYV},
 	{ "nv16", 18, 1, "Y_UV8 (4:2:2 2-plane)",
@@ -192,9 +192,9 @@ static const struct xilinx_frmbuf_format_desc xilinx_frmbuf_formats[] = {
 	{ "rgb3", 20, 3, "RGB8 (RGB)",
 		DRM_FORMAT_BGR888, V4L2_PIX_FMT_RGB24},
 	{ "grey", 21, 3, "YUV8 (YUV)",
-		NULL, NULL},
+		0, 0},
 	{ "xlx3", 24, 4, "Y8 (YUV)",
-		NULL, V4L2_PIX_FMT_GREY}
+		0, V4L2_PIX_FMT_GREY}
 };
 
 static const struct xilinx_frmbuf_config frmbuf_wr_config = {
@@ -254,7 +254,6 @@ static int xilinx_frmbuf_set_vid_fmt(struct xilinx_frmbuf_chan *chan)
 		(struct xilinx_xdma_config *)chan->common.private;
 	int i;
 	struct device *dev = chan->xdev->dev;
-	uint32_t code;
 
 	if (!config) {
 		dev_err(dev, "Missing dma config in dma_chan obj\n");
@@ -812,10 +811,7 @@ static int xilinx_frmbuf_chan_probe(struct xilinx_frmbuf_device *xdev,
 				  struct device_node *node)
 {
 	struct xilinx_frmbuf_chan *chan;
-	const char *string;
 	int err;
-	int i;
-	int ret;
 
 	/* Allocate and initialize the channel structure */
 	chan = devm_kzalloc(xdev->dev, sizeof(*chan), GFP_KERNEL);
@@ -903,9 +899,8 @@ static int xilinx_frmbuf_probe(struct platform_device *pdev)
 						   GPIOD_OUT_HIGH);
 	if (IS_ERR(xdev->rst_gpio)) {
 		err = PTR_ERR(xdev->rst_gpio);
-		if (err == -EPROBE_DEFER) {
+		if (err == -EPROBE_DEFER)
 			dev_info(&pdev->dev, "Probe deferred due to GPIO reset defer\n");
-		} 
 		else
 			dev_err(&pdev->dev, "Unable to locate reset property in dt\n");
 		goto error;
