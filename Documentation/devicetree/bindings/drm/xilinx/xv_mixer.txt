@@ -60,9 +60,9 @@ Layer Sub Node Properties:
 	  Streaming	|  YUV 4:2:0	   | Supported in future version
 			|		   |
 	  Memory	|  RGB8		   | "bgr888"
-	  Memory	|  YUV8		   | "vuy888"
+	  Memory	|  YUV8		   | Supported in future version
 	  Memory	|  RGBX8	   | "xbgr8888"
-	  Memory	|  YUVX8	   | "xvuy8888"
+	  Memory	|  YUVX8	   | Supported in future version
 	  Memory	|  YUYV8	   | "yuv422"
 	  Memory	|  RGBA8	   | "abgr8888"
 	  Memory	|  BGRA8	   | "argb8888"
@@ -102,8 +102,6 @@ Layer Sub Node Properties:
 	  "bgr888"	   |  DRM_FORMAT_BGR888
 	  "rgb888"	   |  DRM_FORMAT_RGB888 **
 	  "bgr565"	   |  DRM_FORMAT_BGR565 *
-	  "vuy888"	   |  DRM_FORMAT_VUY888
-	  "xvuy8888"	   |  DRM_FORMAT_XVUY8888
 	  "yuv422"	   |  DRM_FORMAT_YUYV
 	  "ayuv"	   |  DRM_FORMAT_AYUV *
 	  "nv12"	   |  DRM_FORMAT_NV12
