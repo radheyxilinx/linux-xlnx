@@ -1,34 +1,11 @@
-/******************************************************************************
+/*
+ * (C) Copyright 2016 - 2017, Xilinx, Inc.
  *
- * Copyright (C) 2016 Xilinx, Inc.  All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * Use of the Software is limited solely to applications:
- * (a) running on a Xilinx device, or
- * (b) that interact with a Xilinx device through a bus or interconnect.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * XILINX  BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
- * OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- * Except as contained in this notice, the name of the Xilinx shall not be used
- * in advertising or otherwise to promote the sale, use or other dealings in
- * this Software without prior written authorization from Xilinx.
- *
- ******************************************************************************/
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 2 of
+ * the License, or (at your option) any later version.
+ */
 
 #ifndef __XLNX_DRM_MIXER__
 #define __XLNX_DRM_MIXER__
@@ -78,10 +55,9 @@ struct xilinx_drm_mixer {
  * @returns reference to drm mixer instance struct; err pointer otherwise
  *
  */
-struct xilinx_drm_mixer *
-xilinx_drm_mixer_probe(struct device *dev,
-		struct device_node *node,
-		struct xilinx_drm_plane_manager *manager);
+struct xilinx_drm_mixer * xilinx_drm_mixer_probe(struct device *dev,
+				struct device_node *node,
+				struct xilinx_drm_plane_manager *manager);
 
 /**
  * Mixer-specific implementation for xilinx_drm_plane_mode_set() call.
@@ -105,8 +81,7 @@ xilinx_drm_mixer_probe(struct device *dev,
  *
  * @returns 0 on success.  Non-zero linux error code otherwise.
  */
-int
-xilinx_drm_mixer_set_plane(struct xilinx_drm_plane *plane,
+int xilinx_drm_mixer_set_plane(struct xilinx_drm_plane *plane,
 			struct drm_framebuffer *fb,
 			int crtc_x, int crtc_y,
 			uint32_t src_x, uint32_t src_y,
@@ -118,8 +93,7 @@ xilinx_drm_mixer_set_plane(struct xilinx_drm_plane *plane,
  *
  * @param[in] mixer drm mixer object
  */
-void
-xilinx_drm_create_mixer_plane_properties(struct xilinx_drm_mixer *mixer);
+void xilinx_drm_create_mixer_plane_properties(struct xilinx_drm_mixer *mixer);
 
 /**
  * Used to set the current value for a particular plane property in the
@@ -132,8 +106,7 @@ xilinx_drm_create_mixer_plane_properties(struct xilinx_drm_mixer *mixer);
  *
  * @returns 0 on success; EINVAL otherwise
  */
-int
-xilinx_drm_mixer_set_plane_property(struct xilinx_drm_plane *plane,
+int xilinx_drm_mixer_set_plane_property(struct xilinx_drm_plane *plane,
 				struct drm_property *property,
 				uint64_t value);
 
@@ -151,8 +124,8 @@ xilinx_drm_mixer_set_plane_property(struct xilinx_drm_plane *plane,
  *		(this may indicate an out-of-memory condition or failed mixer
  *		probe)
  */
-int
-xilinx_drm_create_mixer_layer_plane(struct xilinx_drm_plane_manager *manager,
+int xilinx_drm_create_mixer_layer_plane(
+				struct xilinx_drm_plane_manager *manager,
 				struct xilinx_drm_plane *plane,
 				struct device_node *node);
 
@@ -166,8 +139,7 @@ xilinx_drm_create_mixer_layer_plane(struct xilinx_drm_plane_manager *manager,
  * @param[in] plane Xilinx drm plane object to inspect and attach appropriate
  *		properties to
  */
-void
-xilinx_drm_mixer_attach_plane_prop(struct xilinx_drm_plane *plane);
+void xilinx_drm_mixer_attach_plane_prop(struct xilinx_drm_plane *plane);
 
 /**
  * Hold the reset line for the IP core low for 300 nano seconds and then
@@ -177,8 +149,7 @@ xilinx_drm_mixer_attach_plane_prop(struct xilinx_drm_plane *plane);
  * @param[in] mixer IP core instance to reset
  *
  */
-void
-xilinx_drm_mixer_reset(struct xilinx_drm_mixer *mixer);
+void xilinx_drm_mixer_reset(struct xilinx_drm_mixer *mixer);
 
 /**
  * Start generation of video stream from mixer
@@ -188,8 +159,7 @@ xilinx_drm_mixer_reset(struct xilinx_drm_mixer *mixer);
  * @note sets the mixer to auto-restart so that video will be streamed
  *       continuously
  */
-void
-xilinx_drm_mixer_start(struct xv_mixer *mixer);
+void xilinx_drm_mixer_start(struct xv_mixer *mixer);
 
 /**
  * Internal method used to look-up color format index based on device tree
@@ -203,8 +173,7 @@ xilinx_drm_mixer_start(struct xv_mixer *mixer);
  *
  * @note Should not be used outside of DRM driver.
  */
-int
-xilinx_drm_mixer_string_to_fmt(const char *color_fmt, u32 *output);
+int xilinx_drm_mixer_string_to_fmt(const char *color_fmt, u32 *output);
 
 /**
  * Internal method used to use Xilinx color id and match to DRM-based fourcc
@@ -217,8 +186,7 @@ xilinx_drm_mixer_string_to_fmt(const char *color_fmt, u32 *output);
  *
  * @note Should not be used outside of DRM driver.
  */
-int
-xilinx_drm_mixer_fmt_to_drm_fmt(enum xv_comm_color_fmt_id id, u32 *output);
+int xilinx_drm_mixer_fmt_to_drm_fmt(enum xv_comm_color_fmt_id id, u32 *output);
 
 
 /**
@@ -233,8 +201,7 @@ xilinx_drm_mixer_fmt_to_drm_fmt(enum xv_comm_color_fmt_id id, u32 *output);
  * @returns 0 on success; either -EINVAL if scale value is illegal or
  *          -ENODEV if layer does not exist (null)
  */
-int
-xilinx_drm_mixer_set_layer_scale(struct xilinx_drm_plane *plane,
+int xilinx_drm_mixer_set_layer_scale(struct xilinx_drm_plane *plane,
 				uint64_t val);
 
 /**
@@ -246,8 +213,7 @@ xilinx_drm_mixer_set_layer_scale(struct xilinx_drm_plane *plane,
  *
  * @returns 0 on success; -EINVAL on failure
  */
-int
-xilinx_drm_mixer_set_layer_alpha(struct xilinx_drm_plane *plane,
+int xilinx_drm_mixer_set_layer_alpha(struct xilinx_drm_plane *plane,
 				uint64_t val);
 
 /**
@@ -256,8 +222,7 @@ xilinx_drm_mixer_set_layer_alpha(struct xilinx_drm_plane *plane,
  * @param[in] plane Drm plane object describing video layer to disable
  *
  */
-void
-xilinx_drm_mixer_layer_disable(struct xilinx_drm_plane *plane);
+void xilinx_drm_mixer_layer_disable(struct xilinx_drm_plane *plane);
 
 /**
  * Enables video output represented by the plane object
@@ -265,8 +230,7 @@ xilinx_drm_mixer_layer_disable(struct xilinx_drm_plane *plane);
  * @param[in] plane Drm plane object describing video layer to enable
  *
  */
-void
-xilinx_drm_mixer_layer_enable(struct xilinx_drm_plane *plane);
+void xilinx_drm_mixer_layer_enable(struct xilinx_drm_plane *plane);
 
 
 /**
@@ -280,8 +244,7 @@ xilinx_drm_mixer_layer_enable(struct xilinx_drm_plane *plane);
  *
  * @returns 0 on success; -ENODEV if mixer layer does not exist
  */
-int
-xilinx_drm_mixer_mark_layer_active(struct xilinx_drm_plane *plane);
+int xilinx_drm_mixer_mark_layer_active(struct xilinx_drm_plane *plane);
 
 /**
  * Enables video output represented by the plane object
@@ -294,8 +257,7 @@ xilinx_drm_mixer_mark_layer_active(struct xilinx_drm_plane *plane);
  *
  * @returns 0 on success; -ENODEV if mixer layer does not exist
  */
-int
-xilinx_drm_mixer_mark_layer_inactive(struct xilinx_drm_plane *plane);
+int xilinx_drm_mixer_mark_layer_inactive(struct xilinx_drm_plane *plane);
 
 /**
  * Establishes new coordinates and dimensions for a video plane layer
@@ -314,8 +276,7 @@ xilinx_drm_mixer_mark_layer_inactive(struct xilinx_drm_plane *plane);
  * @note New size and coordinates of window must fit within the currently active
  * area of the crtc (e.g. the background resolution)
  */
-int
-xilinx_drm_mixer_set_layer_dimensions(struct xilinx_drm_plane *plane,
+int xilinx_drm_mixer_set_layer_dimensions(struct xilinx_drm_plane *plane,
 				u32 crtc_x, u32 crtc_y,
 				u32 width, u32 height, u32 stride);
 
@@ -332,8 +293,8 @@ xilinx_drm_mixer_set_layer_dimensions(struct xilinx_drm_plane *plane,
  * @note Does not apply to logo layer.  Logo layer data is contained within the
  *	struct xv_mixer instance.
  */
-struct xv_mixer_layer_data *
-xilinx_drm_mixer_get_layer(struct xv_mixer *mixer, enum xv_mixer_layer_id id);
+struct xv_mixer_layer_data * xilinx_drm_mixer_get_layer(struct xv_mixer *mixer,
+						enum xv_mixer_layer_id id);
 
 
 /**
@@ -346,8 +307,7 @@ xilinx_drm_mixer_get_layer(struct xv_mixer *mixer, enum xv_mixer_layer_id id);
  *		a drm vertical blank event generation function.
  * @param[in] data Pointer to crtc object
  */
-void
-xilinx_drm_mixer_set_intr_handler(struct xilinx_drm_mixer *mixer,
+void xilinx_drm_mixer_set_intr_handler(struct xilinx_drm_mixer *mixer,
 				void (*intr_handler_fn)(void *),
 				void *data);
 
@@ -359,8 +319,7 @@ xilinx_drm_mixer_set_intr_handler(struct xilinx_drm_mixer *mixer,
  * param[in] plane Plane/mixer layer to enable/disable (based on dpms value)
  * param[in] dpms  Display power management state to act upon
  */
-void
-xilinx_drm_mixer_plane_dpms(struct xilinx_drm_plane *plane, int dpms);
+void xilinx_drm_mixer_plane_dpms(struct xilinx_drm_plane *plane, int dpms);
 
 
 /**
@@ -369,8 +328,7 @@ xilinx_drm_mixer_plane_dpms(struct xilinx_drm_plane *plane, int dpms);
  * param[in] mixer Device instance representing mixer IP
  * param[in] dpms  Display power management state to act upon
  */
-void
-xilinx_drm_mixer_dpms(struct xilinx_drm_mixer *mixer, int dpms);
+void xilinx_drm_mixer_dpms(struct xilinx_drm_mixer *mixer, int dpms);
 
 /**
  * Updates internal R, G and B buffer array of mixer from kernel framebuffer
@@ -386,8 +344,7 @@ xilinx_drm_mixer_dpms(struct xilinx_drm_mixer *mixer, int dpms);
  * @note Initial call caches buffer kernel virtual address.  Subsequent calls
  *       will only re-load buffer if virtual address and/or size changes.
  */
-int
-xilinx_drm_mixer_update_logo_img(struct xilinx_drm_plane *plane,
+int xilinx_drm_mixer_update_logo_img(struct xilinx_drm_plane *plane,
 				struct drm_gem_cma_object *buffer,
 				uint32_t src_w, uint32_t src_h);
 #endif /* end __XLNX_DRM_MIXER__ */
