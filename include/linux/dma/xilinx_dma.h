@@ -31,6 +31,9 @@ enum xdma_ip_type {
 	XDMA_TYPE_FRMBUF,
 };
 
+/**
+ * @enum vid_frmwork_type: Linux video framework type
+ */
 enum vid_frmwork_type {
 	XDMA_DRM = 0,
 	XDMA_V4L2,
@@ -63,7 +66,11 @@ struct xilinx_vdma_config {
 	int ext_fsync;
 };
 
-
+/**
+ * @struct xilinx_xdma_config: Configuration data for video-aware DMA IP
+ * @fourcc: Video code indicating memory format of video data
+ * @type: From which Linux video framework (V4L2 or DRM) is the fourcc code
+ */
 struct xilinx_xdma_config {
 	uint32_t fourcc;
 	enum vid_frmwork_type type;
