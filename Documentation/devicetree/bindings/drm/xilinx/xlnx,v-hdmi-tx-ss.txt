@@ -14,35 +14,49 @@ should offer a CCF clock that supports .set_rate(). Through this,
 the device can retime/redrive the HDMI TX signal on the connector
 depending on the TX clock line rate.
 
-All properties are required.
-
+Required properties:
+ - compatible: Should be "xlnx,v-hdmi-tx-ss-2.0".
+ - reg: Base address and size of the IP core.
+ - interrupts: Interrupt number.
+ - interrupts-parent: phandle for interrupt controller.
+ 
+ - clocks: phandle for axi-lite, video stream and retimer clock
+ - clock-names: The identification string, "axi-lite", is always required for
+                the axi-lite clock, "video" is always required for video stream
+				clock and "retimer-clk" is required only when retimer is being 
+				used 
+   
+ - phys: phandle for phy lanes registered for hdmi protocol. HDMI always 
+         require 3 lanes
+ - phy-names: The identification string, "hdmi-phy0" and so on
+ - xlnx,input-pixels-per-clock: IP configuration for samples/clk (1, 2, 4)
+         Note: Only 2 is supported at this time
+ - xlnx,max-bits-per-component: The data width per video component (8,10,12,16)
+         Note: Only 8 is supported at this time
+ - xlnx,pixel-format: Output Streaming format. Valid strings are "rgb", 
+         "yuv444", "yuv422" and "yuv420"
+ - xlnx,hdmi-tx-offset: Relative offset of tx core within the subsystem
+ - xlnx,vtc-offset: Relative offset of vtc core within the subsystem
+ 
 The "retimer-clk" is optional. If present, it is notified of TX link
 clock changes through set_rate(). Tested with dp159.c driver.
 
-phy-names must be hdmi-phy0 etc.
-
-	hdmi_txss: hdmi_txss@a0060000 {
+	hdmi_output_v_hdmi_tx_ss_0: v_hdmi_tx_ss@a0020000 {
 		compatible = "xlnx,v-hdmi-tx-ss-2.0";
-		reg = <0x0 0xa0060000 0x0 0x20000>;
+		reg = <0x0 0xa0020000 0x0 0x20000>;
 		interrupts = <0 93 4>;
 		interrupt-parent = <&gic>;
-
+		
 		clocks = <&vid_s_axi_clk>, <&vid_stream_clk>, <&dp159>;
 		clock-names = "axi-lite", "video", "retimer-clk";
+		
+		phy-names = "hdmi-phy0", "hdmi-phy1", "hdmi-phy2";
+		phys = <&vphy_lane0 0 1 1 1>, <&vphy_lane1 0 1 1 1>, <&vphy_lane2 0 1 1 1>;
 
-		phy-names = "hdmi-phy2";
-		phys = <&vphy_lane2 0 1 1 125000000>;
-
-		/* these are created by the device tree generator (DTG) */
 		xlnx,input-pixels-per-clock = <0x2>;
 		xlnx,max-bits-per-component = <0x8>;
-
-		/* not yet standardized or created by the DTG */
-		/* required offset of VTC within reg */
+		xlnx,pixel-format = "yuv422";
+		xlnx,hdmi-tx-offset = <0x00000>;
 		xlnx,vtc-offset = <0x10000>;
-
-		/* not yet standardized or created by the DTG */
-		/* required offset of VTC within reg */
-		xlnx,pixel-format = "argb8888";
 	};
 
