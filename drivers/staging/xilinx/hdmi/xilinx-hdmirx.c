@@ -281,10 +281,6 @@ static void xhdmirx_delayed_work_enable_hotplug(struct work_struct *work)
 	BUG_ON(!xhdmirx);
 	HdmiRxSsPtr = &xhdmirx->xv_hdmirxss;
 
-#if 0
-	struct v4l2_subdev *subdev = &xhdmirx->subdev;
-	v4l2_dbg(2, debug, subdev, "%s: enable hotplug\n", __func__);
-#endif
 	XV_HdmiRx_SetHpd(HdmiRxSsPtr->HdmiRxPtr, 1);
 }
 
@@ -332,18 +328,6 @@ static int xhdmirx_enum_frame_size(struct v4l2_subdev *subdev,
 	 * do not return a discrete set */
 	return 0;
 }
-
-#if 0 /* use default implementation as we support a non-discrete range of timings exposed by timing capabilities */
-static int xhdmirx_enum_dv_timings(struct v4l2_subdev *sd,
-				    struct v4l2_enum_dv_timings *timings)
-{
-	if (timings->pad != 0)
-		return -EINVAL;
-
-	return v4l2_enum_dv_timings_cap(timings,
-			&xhdmirx_timings_cap, NULL, NULL);
-}
-#endif
 
 static int xhdmirx_dv_timings_cap(struct v4l2_subdev *subdev,
 		struct v4l2_dv_timings_cap *cap)
@@ -503,7 +487,6 @@ static irqreturn_t hdmirx_irq_handler(int irq, void *dev_id)
 	unsigned long flags;
 	BUG_ON(!dev_id);
 	xhdmirx = (struct xhdmirx_device *)dev_id;
-	//printk(KERN_INFO "hdmirx_irq_handler()\n");
 	HdmiRxSsPtr = (XV_HdmiRxSs *)&xhdmirx->xv_hdmirxss;
 	BUG_ON(!HdmiRxSsPtr->HdmiRxPtr);
 
@@ -762,7 +745,6 @@ static void RxStreamUpCallback(void *CallbackRef)
 	/* Hsync polarity, Positive == 1 */
 		(Stream->Timing.HSyncPolarity? V4L2_DV_HSYNC_POS_POL: 0);
 
-#if 1
 	/* from xvid.c:XVidC_GetPixelClockHzByVmId() but without VmId */
 	if (Stream->IsInterlaced) {
 		xhdmirx->detected_timings.bt.pixelclock =
@@ -773,16 +755,6 @@ static void RxStreamUpCallback(void *CallbackRef)
 			Stream->Timing.F0PVTotal * Stream->FrameRate;
 	}
 	xhdmirx->detected_timings.bt.pixelclock *= Stream->Timing.HTotal;
-#elif 0 /* @TODO: REMOVE THIS */
-	xhdmirx->detected_timings.bt.pixelclock =
-		XVidC_GetPixelClockHzByHVFr(
-			Stream->Timing.HTotal,
-			Stream->Timing.F0PVTotal,
-			Stream->FrameRate);
-#else /* @TODO: REMOVE THIS */
-	xhdmirx->detected_timings.bt.pixelclock =
-		HdmiRxSsPtr->HdmiRxPtr->Stream.PixelClk;
-#endif
 
 	hdmi_dbg("HdmiRxSsPtr->HdmiRxPtr->Stream.PixelClk = %d\n", HdmiRxSsPtr->HdmiRxPtr->Stream.PixelClk);
 	/* Read HFront Porch */
@@ -1097,8 +1069,6 @@ static int xhdmirx_probe(struct platform_device *pdev)
 	
 	hdmi_mutex_lock(&xhdmirx->xhdmirx_mutex);
 
-
-
 	/* sets pointer to the EDID used by XV_HdmiRxSs_LoadDefaultEdid() */
 	XV_HdmiRxSs_SetEdidParam(HdmiRxSsPtr, (u8 *)&xilinx_edid[0], sizeof(xilinx_edid));
 
@@ -1263,13 +1233,6 @@ static int xhdmirx_remove(struct platform_device *pdev)
 
 	cancel_delayed_work(&xhdmirx->delayed_work_enable_hotplug);
 	destroy_workqueue(xhdmirx->work_queue);
-#if 0 // @TODO mutex can not be acquired
-	hdmi_mutex_lock(&xhdmirx->xhdmirx_mutex);
-#endif
-
-#if 0
-	hdmi_mutex_unlock(&xhdmirx->xhdmirx_mutex);
-#endif
 
 	v4l2_async_unregister_subdev(subdev);
 	v4l2_ctrl_handler_free(&xhdmirx->ctrl_handler);

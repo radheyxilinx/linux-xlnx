@@ -280,7 +280,6 @@ static struct phy *xvphy_xlate(struct device *dev,
 	}
 	for (index = 0; index < of_get_child_count(dev->of_node); index++) {
 		if (phynode == vphydev->lanes[index]->phy->dev.of_node) {
-			//dev_info(dev, "xvphy_xlate() matched with phy index %d\n", index);
 			vphy_lane = vphydev->lanes[index];
 			break;
 		}
@@ -302,7 +301,6 @@ static struct phy *xvphy_xlate(struct device *dev,
 	/* get the direction for controller from lanes */
 	vphy_lane->direction_tx = args->args[3];
 
-	//dev_info(dev, "xvphy_xlate() returns phy %p\n", vphy_lane->phy);
 	BUG_ON(!vphy_lane->phy);
 	return vphy_lane->phy;
 }
