@@ -13,10 +13,10 @@ Required Properties:
  - interrupts: Interrupt number.
  - interrupts-parent: phandle for interrupt controller.
  
- - clocks: phandle for axi-lite and video stream clock
+ - clocks: phandle for axi-lite, video stream and dru clock
  - clock-names: The identification string, "axi-lite", is always required for
                 the axi-lite clock, "video" is always required for video stream
-				clock and "retimer-clk"
+				clock and "dru-clk" is required for NI DRU clock for phy
    
  - phys: phandle for phy lanes registered for hdmi protocol. HDMI always 
          require 3 lanes
@@ -37,8 +37,8 @@ Required Properties:
 		interrupts = <0 91 4>;
 		interrupt-parent = <&gic>;
 
-		clocks = <&vid_s_axi_clk>, <&vid_stream_clk>;
-		clock-names = "axi-lite", "video";
+		clocks = <&vid_s_axi_clk>, <&vid_stream_clk>, <&si570_2>;
+		clock-names = "axi-lite", "video", "dru-clk";
 
 		phy-names = "hdmi-phy0", "hdmi-phy1", "hdmi-phy2";
 		phys = <&vphy_lane0 0 1 1 0>, <&vphy_lane1 0 1 1 0>, <&vphy_lane2 0 1 1 0>;
