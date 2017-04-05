@@ -137,7 +137,6 @@ static int dp159_probe(struct i2c_client *client,
 	struct clk_init_data init;
 	int ret;
 
-	printk(KERN_INFO, "dp159 probed\n");
 	/* Check if the adapter supports the needed features */
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA))
 		return -EIO;
@@ -188,7 +187,6 @@ static int dp159_probe(struct i2c_client *client,
 		dev_err(&client->dev, "unable to add clk provider\n");
 	}
 
-	printk(KERN_INFO, "dp159 probe successful\n");
 	return 0;
 }
 

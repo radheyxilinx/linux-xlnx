@@ -1099,7 +1099,8 @@ static const struct clk_ops si5324_clkout_ops = {
  */
 #ifdef CONFIG_OF
 static const struct of_device_id si5324_dt_ids[] = {
-	{ .compatible = "silabs,si5324", },
+	{ .compatible = "silabs,si5324" },
+	{ .compatible = "silabs,si5319" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, si5324_dt_ids);
@@ -1249,7 +1250,6 @@ static int si5324_i2c_probe(struct i2c_client *client,
 	u8 num_parents, num_clocks;
 	int ret, n;
 
-	printk(KERN_INFO, "si5324 probed\n");
 	ret = si5324_dt_parse(client);
 	if (ret)
 		return ret;
@@ -1467,7 +1467,6 @@ static int si5324_i2c_probe(struct i2c_client *client,
 		goto err_clk;
 	}
 	si5324_dbg("Initialized Si5324.\n");
-	printk(KERN_INFO, "si5324 probe successful\n");
 
 	return 0;
 

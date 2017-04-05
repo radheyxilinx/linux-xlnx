@@ -23,21 +23,17 @@
 
 struct phy;
 
-#if (1 || defined(CONFIG_PHY_XILINX_VPHY))
+/* VPHY is built (either as module or built-in) */
+#if defined(CONFIG_PHY_XILINX_VPHY)
 
 extern XVphy *xvphy_get_xvphy(struct phy *phy);
 extern void xvphy_mutex_lock(struct phy *phy);
 extern void xvphy_mutex_unlock(struct phy *phy);
 extern int xvphy_do_something(struct phy *phy);
 
-#if 0
-extern XVphy_PllType xvphy_get_plltype(struct phy *phy, u8 QuadId,
-						 XVphy_DirectionType Dir, XVphy_ChannelId ChId);
-extern int xvphy_set_hdmi_callback(struct phy *phy, XVphy_HdmiHandlerType HandlerType,
-					   void *CallbackFunc, void *CallbackRef);
-#endif
-
+/* VPHY is not compiled in, make sure RX and TX fail */
 #else
+
 static inline XVphy *xvphy_get_xvphy(struct phy *phy)
 {
 	return NULL;
@@ -51,20 +47,6 @@ static inline int xvphy_do_something(struct phy *phy)
 	return -ENODEV;
 }
 
-#if 0
-XVphy_PllType xvphy_get_plltype(struct phy *phy, u8 QuadId,
-						 XVphy_DirectionType Dir, XVphy_ChannelId ChId)
-{
-	return 0;
-}
-
-static inline int int xvphy_set_hdmi_callback(struct phy *phy, XVphy_HdmiHandlerType HandlerType,
-					   void *CallbackFunc, void *CallbackRef)
-{
-	return -ENODEV;
-}
-#endif
-
-#endif /* (1 || defined(CONFIG_PHY_XILINX_VPHY)) */
+#endif /* (defined(CONFIG_PHY_XILINX_VPHY)) */
 
 #endif /* _PHY_VPHY_H_ */
