@@ -26,6 +26,8 @@
 #define DEBUG
 //#define DEBUG_TRACE
 
+#define DEBUG_MUTEX
+
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/io.h>
@@ -54,17 +56,7 @@
 #include "phy-xilinx-vphy/xvidc.h"
 #include "phy-xilinx-vphy/xvidc_edid.h"
 
-/* either comment-out, or define as 1. Adapt Makefile also, see HDCP section */
-//#define USE_HDCP 1
 
-#if (defined(USE_HDCP) && USE_HDCP) /* WIP HDCP */
-#include "phy-xilinx-vphy/bigdigits.h"
-#include "phy-xilinx-vphy/xhdcp22_cipher.h"
-#include "phy-xilinx-vphy/xhdcp22_mmult.h"
-#include "phy-xilinx-vphy/xhdcp22_rng.h"
-#include "phy-xilinx-vphy/xhdcp22_common.h"
-#include "phy-xilinx-vphy/xtmrctr.h"
-#endif
 
 /* select either trace or printk logging */
 #ifdef DEBUG_TRACE
@@ -84,6 +76,20 @@
 #  define hdmi_dbg(x...)
 #endif
 
+#if (defined(DEBUG_MUTEX) && defined(DEBUG))
+/* storage for source code line number where mutex was last locked, -1 otherwise */
+static int hdmi_mutex_line = -1;
+/* If mutex is locked, print the line number of where it was locked. lock the mutex.
+ * Please keep this macro on a single line, so that the C __LINE__ macro is correct.
+ */
+#  define hdmi_mutex_lock(x) do { if (mutex_is_locked(x)) { hdmi_dbg("@line %d waiting for mutex owner @line %d\n", __LINE__, hdmi_mutex_line); } mutex_lock(x); hdmi_mutex_line = __LINE__; } while(0)
+#  define hdmi_mutex_unlock(x) do { hdmi_mutex_line = -1; mutex_unlock(x); } while(0)
+/* non-debug variant */
+#else
+#  define hdmi_mutex_lock(x) mutex_lock(x)
+#  define hdmi_mutex_unlock(x) mutex_unlock(x)
+#endif
+
 /**
  * struct xvphy_lane - representation of a lane
  * @phy: pointer to the kernel PHY device
@@ -94,7 +100,7 @@
  * @ref_clk: enum of allowed ref clock rates for this lane PLL
  * @pll_lock: PLL status
  * @data: pointer to hold private data
- * @refclk_rate: PLL reference clock frequency
+ * @direction: 0=rx, 1=tx
  * @share_laneclk: lane number of the clock to be shared
  */
 struct xvphy_lane {
@@ -105,7 +111,7 @@ struct xvphy_lane {
 	bool pll_lock;
 	/* data is pointer to parent xvphy_dev */
 	void *data;
-	u32 refclk_rate;
+	bool direction_tx;
 	u32 share_laneclk;
 };
 
@@ -144,7 +150,7 @@ void xvphy_mutex_lock(struct phy *phy)
 {
 	struct xvphy_lane *vphy_lane = phy_get_drvdata(phy);
 	struct xvphy_dev *vphy_dev = vphy_lane->data;
-	mutex_lock(&vphy_dev->xvphy_mutex);
+	hdmi_mutex_lock(&vphy_dev->xvphy_mutex);
 }
 EXPORT_SYMBOL_GPL(xvphy_mutex_lock);
 
@@ -152,7 +158,7 @@ void xvphy_mutex_unlock(struct phy *phy)
 {
 	struct xvphy_lane *vphy_lane = phy_get_drvdata(phy);
 	struct xvphy_dev *vphy_dev = vphy_lane->data;
-	mutex_unlock(&vphy_dev->xvphy_mutex);
+	hdmi_mutex_unlock(&vphy_dev->xvphy_mutex);
 }
 EXPORT_SYMBOL_GPL(xvphy_mutex_unlock);
 
@@ -205,16 +211,15 @@ static irqreturn_t xvphy_irq_thread(int irq, void *dev_id)
 	if (!vphydev)
 		return IRQ_NONE;
 
-	//printk(KERN_DEBUG "xvphy_irq_thread()\n");
 	/* call baremetal interrupt handler with mutex locked */
-	mutex_lock(&vphydev->xvphy_mutex);
+	hdmi_mutex_lock(&vphydev->xvphy_mutex);
 
 	IntrStatus = XVphy_ReadReg(vphydev->xvphy.Config.BaseAddr, XVPHY_INTR_STS_REG);
 	printk(KERN_DEBUG "XVphy IntrStatus = 0x%08x\n", IntrStatus);
 
 	/* handle pending interrupts */
 	XVphy_InterruptHandler(&vphydev->xvphy);
-	mutex_unlock(&vphydev->xvphy_mutex);
+	hdmi_mutex_unlock(&vphydev->xvphy_mutex);
 
 	/* enable interrupt requesting in the VPHY */
 	XVphy_IntrEnable(&vphydev->xvphy, XVPHY_INTR_HANDLER_TYPE_TXRESET_DONE |
@@ -229,7 +234,6 @@ static irqreturn_t xvphy_irq_thread(int irq, void *dev_id)
 		XVPHY_INTR_HANDLER_TYPE_RX_TMR_TIMEOUT);
 
 	XVphy_LogDisplay(&vphydev->xvphy);
-	//XVphy_HdmiDebugInfo(&vphydev->xvphy, 0, XVPHY_CHANNEL_ID_CH1);
 	return IRQ_HANDLED;
 }
 
@@ -242,11 +246,7 @@ static irqreturn_t xvphy_irq_thread(int irq, void *dev_id)
 static int xvphy_phy_init(struct phy *phy)
 {
 	BUG_ON(!phy);
-	//struct xvphy_lane *vphy_lane = NULL;
 	printk(KERN_INFO "xvphy_phy_init(%p).\n", phy);
-
-	//printk(KERN_INFO "xvphy_probe() found %d phy lanes from device-tree configuration.\n", index);
-	//printk(KERN_INFO "xvphy_probe() found %d phy lanes from device-tree configuration.\n", index);
 
 	return 0;
 }
@@ -299,8 +299,8 @@ static struct phy *xvphy_xlate(struct device *dev,
 	/* Check if lane sharing is required */
 	vphy_lane->share_laneclk = args->args[2];
 
-	/* get the required clk rate for controller from lanes */
-	vphy_lane->refclk_rate = args->args[3];
+	/* get the direction for controller from lanes */
+	vphy_lane->direction_tx = args->args[3];
 
 	//dev_info(dev, "xvphy_xlate() returns phy %p\n", vphy_lane->phy);
 	BUG_ON(!vphy_lane->phy);
@@ -329,13 +329,11 @@ static int vphy_parse_of(struct xvphy_dev *vphydev, XVphy_Config *c)
 	u32 val;
 	bool has_err_irq;
 
-	/* @TODO property name/value unknown, TODO xlnx,xcvrtype?? */
 	rc = of_property_read_u32(node, "xlnx,transceiver-type", &val);
 	if (rc < 0)
 		goto error_dt;
 	c->XcvrType = val;
 
-	/* @TODO property name/value unknown, @TODO xlnx,tx-buffer-bypass?? */
 	rc = of_property_read_u32(node, "xlnx,tx-buffer-bypass", &val);
 	if (rc < 0)
 		goto error_dt;
@@ -411,20 +409,10 @@ static int vphy_parse_of(struct xvphy_dev *vphydev, XVphy_Config *c)
 	c->ErrIrq = has_err_irq;
 	return 0;
 
-#if 0 /* example bool */
-	bool has_dre = false;
-	has_dre = of_property_read_bool(node, "xlnx,include-dre");
-#endif
 error_dt:
 	dev_err(vphydev->dev, "Error parsing device tree");
 	return -EINVAL;
 }
-
-#if (defined(USE_HDCP) && USE_HDCP) /* WIP HDCP */
-extern XHdcp22_Cipher_Config XHdcp22_Cipher_ConfigTable[];
-extern XHdcp22_mmult_Config XHdcp22_mmult_ConfigTable[];
-extern XHdcp22_Rng_Config XHdcp22_Rng_ConfigTable[];
-#endif
 
 /**
  * xvphy_probe - The device probe function for driver initialization.
@@ -488,9 +476,10 @@ static int xvphy_probe(struct platform_device *pdev)
 		phy = devm_phy_create(&pdev->dev, child, &xvphy_phyops);
 		if (IS_ERR(phy)) {
 			ret = PTR_ERR(phy);
+			if (ret == -EPROBE_DEFER)
+				hdmi_dbg("xvphy probe deferred\n");
 			if (ret != -EPROBE_DEFER)
 				dev_err(&pdev->dev, "failed to create PHY\n");
-			hdmi_dbg("xvphy probe deferred\n");
 			return ret;
 		}
 		/* array of pointer to phy */
@@ -502,8 +491,6 @@ static int xvphy_probe(struct platform_device *pdev)
 		port++;
 		index++;
 	}
-
-	//printk(KERN_INFO "xvphy_probe() found %d phy lanes from device-tree configuration.\n", index);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	vphydev->iomem = devm_ioremap_resource(&pdev->dev, res);
@@ -608,53 +595,4 @@ EXPORT_SYMBOL_GPL(XVidC_GetPixelClockHzByVmId);
 EXPORT_SYMBOL_GPL(XVidC_GetVideoModeId);
 EXPORT_SYMBOL_GPL(XVidC_GetPixelClockHzByHVFr);
 
-#if (defined(USE_HDCP) && USE_HDCP) /* WIP HDCP */
-EXPORT_SYMBOL_GPL(mpAdd);
-EXPORT_SYMBOL_GPL(mpConvFromOctets);
-EXPORT_SYMBOL_GPL(mpConvToOctets);
-EXPORT_SYMBOL_GPL(mpDivide);
-EXPORT_SYMBOL_GPL(mpEqual);
-EXPORT_SYMBOL_GPL(mpGetBit);
-EXPORT_SYMBOL_GPL(mpModExp);
-EXPORT_SYMBOL_GPL(mpModInv);
-EXPORT_SYMBOL_GPL(mpModMult);
-EXPORT_SYMBOL_GPL(mpModulo);
-EXPORT_SYMBOL_GPL(mpMultiply);
-EXPORT_SYMBOL_GPL(mpShiftLeft);
-EXPORT_SYMBOL_GPL(mpSubtract);
 
-EXPORT_SYMBOL_GPL(XHdcp22Cipher_CfgInitialize);
-EXPORT_SYMBOL_GPL(XHdcp22Cipher_LookupConfig);
-EXPORT_SYMBOL_GPL(XHdcp22Cipher_SetKs);
-EXPORT_SYMBOL_GPL(XHdcp22Cipher_SetLc128);
-EXPORT_SYMBOL_GPL(XHdcp22Cipher_SetRiv);
-EXPORT_SYMBOL_GPL(XHdcp22Cmn_Aes128Encrypt);
-EXPORT_SYMBOL_GPL(XHdcp22Cmn_HmacSha256Hash);
-EXPORT_SYMBOL_GPL(XHdcp22Cmn_Sha256Hash);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_CfgInitialize);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_IsDone);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_IsReady);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_LookupConfig);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_Read_U_Words);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_Start);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_Write_A_Words);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_Write_B_Words);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_Write_NPrime_Words);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_Write_N_Words);
-EXPORT_SYMBOL_GPL(XHdcp22Rng_CfgInitialize);
-EXPORT_SYMBOL_GPL(XHdcp22Rng_GetRandom);
-EXPORT_SYMBOL_GPL(XHdcp22Rng_LookupConfig);
-EXPORT_SYMBOL_GPL(XTmrCtr_CfgInitialize);
-EXPORT_SYMBOL_GPL(XTmrCtr_GetValue);
-EXPORT_SYMBOL_GPL(XTmrCtr_LookupConfig);
-EXPORT_SYMBOL_GPL(XTmrCtr_Reset);
-EXPORT_SYMBOL_GPL(XTmrCtr_SetHandler);
-EXPORT_SYMBOL_GPL(XTmrCtr_SetOptions);
-EXPORT_SYMBOL_GPL(XTmrCtr_SetResetValue);
-EXPORT_SYMBOL_GPL(XTmrCtr_Stop);
-EXPORT_SYMBOL_GPL(XTmrCtr_Start);
-
-EXPORT_SYMBOL_GPL(XHdcp22_Cipher_ConfigTable);
-EXPORT_SYMBOL_GPL(XHdcp22_mmult_ConfigTable);
-EXPORT_SYMBOL_GPL(XHdcp22_Rng_ConfigTable);
-#endif
