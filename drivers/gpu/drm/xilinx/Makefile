@@ -2,6 +2,8 @@
 # Makefile for the drm device driver.  This driver provides support for the
 # Direct Rendering Infrastructure (DRI) in XFree86 4.1.0 and higher.
 
+ccflags-y := -I$(src)
+
 MIXER_CRTC_DRM=crtc/mixer/drm
 MIXER_CRTC_HW=crtc/mixer/hw
 
