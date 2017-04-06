@@ -23,10 +23,10 @@
  */
 
 /* if both both DEBUG and DEBUG_TRACE are defined, trace_printk() is used */
-#define DEBUG
+//#define DEBUG
 //#define DEBUG_TRACE
 
-#define DEBUG_MUTEX
+//#define DEBUG_MUTEX
 
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -184,7 +184,6 @@ static irqreturn_t xvphy_irq_handler(int irq, void *dev_id)
 	BUG_ON(!vphydev);
 	if (!vphydev)
 		return IRQ_NONE;
-	//printk(KERN_DEBUG "xvphy_irq_handler()\n");
 
 	/* disable interrupts in the VPHY, they are re-enabled once serviced */
 	XVphy_IntrDisable(&vphydev->xvphy, XVPHY_INTR_HANDLER_TYPE_TXRESET_DONE |
@@ -233,7 +232,9 @@ static irqreturn_t xvphy_irq_thread(int irq, void *dev_id)
 		XVPHY_INTR_HANDLER_TYPE_TX_TMR_TIMEOUT |
 		XVPHY_INTR_HANDLER_TYPE_RX_TMR_TIMEOUT);
 
+#ifdef DEBUG		
 	XVphy_LogDisplay(&vphydev->xvphy);
+#endif
 	return IRQ_HANDLED;
 }
 

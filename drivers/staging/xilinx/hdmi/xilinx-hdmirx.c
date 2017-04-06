@@ -13,10 +13,10 @@
  */
 
 /* if both both DEBUG and DEBUG_TRACE are defined, trace_printk() is used */
-#define DEBUG
+//#define DEBUG
 //#define DEBUG_TRACE
 
-#define DEBUG_MUTEX
+//#define DEBUG_MUTEX
 
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
@@ -519,8 +519,6 @@ static irqreturn_t hdmirx_irq_thread(int irq, void *dev_id)
 	XV_HdmiRxSs *HdmiRxSsPtr;
 	unsigned long flags;
 	int i;
-	char which[8] = "01234567";
-	int which_mask = 0;
 
 	BUG_ON(!dev_id);
 	xhdmirx = (struct xhdmirx_device *)dev_id;
@@ -534,12 +532,6 @@ static irqreturn_t hdmirx_irq_thread(int irq, void *dev_id)
 	hdmi_mutex_lock(&xhdmirx->xhdmirx_mutex);
 	/* call baremetal interrupt handler, this in turn will
 	 * call the registed callbacks functions */
-
-	for (i = 0; i < 7; i++) {
-		which[i] = xhdmirx->IntrStatus[i]? '0' + i: '.';
-		which_mask |= (xhdmirx->IntrStatus[i]? 1: 0) << i;
-	}
-	which[7] = 0;
 
 	if (xhdmirx->IntrStatus[0]) HdmiRx_PioIntrHandler(HdmiRxSsPtr->HdmiRxPtr);
 	if (xhdmirx->IntrStatus[1]) HdmiRx_TmrIntrHandler(HdmiRxSsPtr->HdmiRxPtr);
@@ -575,12 +567,9 @@ static void RxConnectCallback(void *CallbackRef)
 
 	xvphy_mutex_lock(xhdmirx->phy[0]);
 	/* RX cable is connected? */
-	if (HdmiRxSsPtr->IsStreamConnected)
-	{
+	if (HdmiRxSsPtr->IsStreamConnected) {
 		XVphy_IBufDsEnable(VphyPtr, 0, XVPHY_DIR_RX, (TRUE));
-	}
-	else
-	{
+	} else {
 		/* clear GT RX TMDS clock ratio */
 		VphyPtr->HdmiRxTmdsClockRatio = 0;
 		XVphy_IBufDsEnable(VphyPtr, 0, XVPHY_DIR_RX, (FALSE));
@@ -781,7 +770,9 @@ static void RxStreamUpCallback(void *CallbackRef)
 	(void)Stream->VmId;
 
 	xhdmirx->hdmi_stream_is_up = 1;
+#ifdef DEBUG	
 	v4l2_print_dv_timings("xilinx-hdmi-rx", "", & xhdmirx->detected_timings, 1);
+#endif	
 }
 
 /* Called from non-interrupt context with xvphy mutex locked

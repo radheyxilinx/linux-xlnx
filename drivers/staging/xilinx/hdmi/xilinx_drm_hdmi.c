@@ -21,10 +21,10 @@
  */
 
 /* if both both DEBUG and DEBUG_TRACE are defined, trace_printk() is used */
-#define DEBUG
+//#define DEBUG
 //#define DEBUG_TRACE
 
-#define DEBUG_MUTEX
+//#define DEBUG_MUTEX
 
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
@@ -649,9 +649,10 @@ static void xilinx_drm_hdmi_mode_set(struct drm_encoder *encoder,
 
 	/* @NOTE in bare-metal, here the Si5324 clock is changed. If this mode_set()
 	 * is run from the fixup() call, we mimick that behaviour */
-
+#ifdef DEBUG
 	XV_HdmiTx_DebugInfo(HdmiTxSsPtr->HdmiTxPtr);
 	XVphy_HdmiDebugInfo(VphyPtr, 0, XVPHY_CHANNEL_ID_CHA);
+#endif	
 	xvphy_mutex_unlock(hdmi->phy[0]);
 	hdmi_mutex_unlock(&hdmi->hdmi_mutex);
 }
