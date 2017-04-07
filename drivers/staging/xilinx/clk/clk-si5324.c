@@ -1283,11 +1283,17 @@ static int si5324_i2c_probe(struct i2c_client *client,
 		return PTR_ERR(drvdata->regmap);
 	}
 
-	if ((si5324_reg_read(drvdata, 134) != 0x01) || (si5324_reg_read(drvdata, 135) != 0x82)) {
-		dev_err(&client->dev, "Identification registers do not indicate Si5324 presence.\n");
+	if ((si5324_reg_read(drvdata, 134) == 0x01) && \
+                (si5324_reg_read(drvdata, 135) == 0x82)) {
+	        si5324_dbg("DevID : 0x01 0x82 : Si5324 found");
+	} else if ((si5324_reg_read(drvdata, 134) == 0x01) && \
+                        (si5324_reg_read(drvdata, 135) == 0x32)) {
+		si5324_dbg("DevID : 0x01 0x32 : Si5319 found");
+	} else {
+		dev_err(&client->dev, "Identification registers do not indicate \
+                                        presence of Si5324 or Si5319.\n");
 		return -ENODEV;
 	}
-
 	si5324_initialize(drvdata);
 
 #if (!defined(FORCE_BYPASS) || !FORCE_BYPASS)
@@ -1482,6 +1488,7 @@ err_clk:
 
 static const struct i2c_device_id si5324_i2c_ids[] = {
 	{ "si5324", 0 },
+	{ "si5319", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, si5324_i2c_ids);
