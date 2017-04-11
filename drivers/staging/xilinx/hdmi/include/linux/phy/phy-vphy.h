@@ -1,7 +1,7 @@
 /*
  * Xilinx VPHY header
  *
- * Copyright (C) 2016 Xilinx, Inc.
+ * Copyright (C) 2016-2017 Xilinx, Inc.
  *
  * Author: Leon Woestenberg <leon@sidebranch.com>
  *

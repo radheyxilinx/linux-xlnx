@@ -73,7 +73,7 @@ static int dp159_program(struct i2c_client *client, unsigned long rate)
 		r |= dp159_write(client, 0x0D, 0x00);
 		r |= dp159_write(client, 0x0A, 0x36);
 	} else {
-		//printk(KERN_INFO "dp159_program(rate = %lu) for HDMI 1.4\n", rate);
+		printk(KERN_INFO "dp159_program(rate = %lu) for HDMI 1.4\n", rate);
 		//r = dp159_write(client, 0x0A, 0x34);			// The redriver mode must be selected to support low video rates
 		/*datasheet has 0 by default. 0x1 disables DDC training and only allows HDMI1.4b/DVI, which is OK*/
 

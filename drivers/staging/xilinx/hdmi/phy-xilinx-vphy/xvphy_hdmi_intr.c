@@ -48,7 +48,6 @@
 
 /******************************* Include Files ********************************/
 
-#include "xparameters.h"
 #if defined (XPAR_XV_HDMITX_0_DEVICE_ID) || defined (XPAR_XV_HDMIRX_0_DEVICE_ID)
 #include "xstatus.h"
 #include "xvphy.h"

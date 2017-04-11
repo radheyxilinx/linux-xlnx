@@ -73,7 +73,6 @@ extern "C" {
 #endif
 
 /***************************** Include Files *********************************/
-#include "xparameters.h"
 #include "xstatus.h"
 #include "xv_hdmirx.h"
 #if !defined(XV_CONFIG_LOG_VHDMIRXSS_DISABLE) && \

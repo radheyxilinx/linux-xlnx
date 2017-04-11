@@ -37,7 +37,6 @@
  * </pre>
  *
 *******************************************************************************/
-#include "xparameters.h"
 #if defined (XPAR_XV_HDMITX_0_DEVICE_ID) || defined (XPAR_XV_HDMIRX_0_DEVICE_ID)
 
 #ifndef XVPHY_HDMI_H_

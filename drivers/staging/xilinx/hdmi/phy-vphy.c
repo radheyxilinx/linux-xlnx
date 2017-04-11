@@ -23,7 +23,7 @@
  */
 
 /* if both both DEBUG and DEBUG_TRACE are defined, trace_printk() is used */
-//#define DEBUG
+#define DEBUG
 //#define DEBUG_TRACE
 
 //#define DEBUG_MUTEX
@@ -178,7 +178,6 @@ EXPORT_SYMBOL_GPL(XVphy_IsBonded);
 static irqreturn_t xvphy_irq_handler(int irq, void *dev_id)
 {
 	struct xvphy_dev *vphydev;
-	u32 IntrStatus;
 	BUG_ON(!dev_id);
 	vphydev = (struct xvphy_dev *)dev_id;
 	BUG_ON(!vphydev);
@@ -306,19 +305,17 @@ static struct phy *xvphy_xlate(struct device *dev,
 	return vphy_lane->phy;
 }
 
-/* @TODO allocate dynamically, inside vphydev struct, once the internal TODOs are resolved
- * required to support multiple vphy's in the driver
- */
-static XVphy_Config config = {
-	.DeviceId = 0,
-	.BaseAddr = 0/* filled during probe*/,
-	.ErrIrq = 0 /* ERR IRQ disabled by default */
-};
+/* Local Global table for phy instance(s) configuration settings */
+XVphy_Config XVphy_ConfigTable[XPAR_XVPHY_NUM_INSTANCES];
 
 static struct phy_ops xvphy_phyops = {
 	.init		= xvphy_phy_init,
 	.owner		= THIS_MODULE,
 };
+
+static int instance = 0;
+/* TX uses [1, 127] and RX uses [128, 254], VPHY uses [256, ...] */
+#define VPHY_DEVICE_ID_BASE 256
 
 static int vphy_parse_of(struct xvphy_dev *vphydev, XVphy_Config *c)
 {
@@ -428,9 +425,8 @@ static int xvphy_probe(struct platform_device *pdev)
 	unsigned long axi_lite_rate;
 
 	struct resource *res;
-	int lanecount, port = 0, index = 0;
+	int port = 0, index = 0;
 	int ret;
-	int i;
 	u32 Status;
 	u32 Data;
 	u16 DrpVal;
@@ -448,8 +444,11 @@ static int xvphy_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, vphydev);
 
 	BUG_ON(!np);
+
+	XVphy_ConfigTable[instance].DeviceId = VPHY_DEVICE_ID_BASE + instance;
+
 	hdmi_dbg("xvphy_probe DT parse start\n");
-	ret = vphy_parse_of(vphydev, &config);
+	ret = vphy_parse_of(vphydev, &XVphy_ConfigTable[instance]);
 	if (ret) return ret;
 	hdmi_dbg("xvphy_probe DT parse done\n");
 
@@ -497,7 +496,7 @@ static int xvphy_probe(struct platform_device *pdev)
 		return PTR_ERR(vphydev->iomem);
 
 	/* set address in configuration data */
-	config.BaseAddr = (uintptr_t)vphydev->iomem;
+	XVphy_ConfigTable[instance].BaseAddr = (uintptr_t)vphydev->iomem;
 
 	vphydev->irq = platform_get_irq(pdev, 0);
 	if (vphydev->irq <= 0) {
@@ -524,7 +523,7 @@ static int xvphy_probe(struct platform_device *pdev)
 	hdmi_dbg("AXI Lite clock rate = %lu Hz\n", axi_lite_rate);
 
 	/* set axi-lite clk in configuration data */
-	config.AxiLiteClkFreq = axi_lite_rate;
+	XVphy_ConfigTable[instance].AxiLiteClkFreq = axi_lite_rate;
 
 	provider = devm_of_phy_provider_register(&pdev->dev, xvphy_xlate);
 	if (IS_ERR(provider)) {
@@ -532,9 +531,25 @@ static int xvphy_probe(struct platform_device *pdev)
 			return PTR_ERR(provider);
 	}
 
+	/* dump configuration for XVphy_HdmiInitialize() */
+	hdmi_dbg("XcvrType = %d\n", (int)XVphy_ConfigTable[instance].XcvrType);
+	hdmi_dbg("TxChannels = %d\n", (int)XVphy_ConfigTable[instance].TxChannels);
+	hdmi_dbg("RxChannels = %d\n", (int)XVphy_ConfigTable[instance].RxChannels);
+	hdmi_dbg("TxProtocol = %d\n", (int)XVphy_ConfigTable[instance].TxProtocol);
+	hdmi_dbg("RxProtocol = %d\n", (int)XVphy_ConfigTable[instance].RxProtocol);
+	hdmi_dbg("TxRefClkSel = %d\n", (int)XVphy_ConfigTable[instance].TxRefClkSel);
+	hdmi_dbg("RxRefClkSel = %d\n", (int)XVphy_ConfigTable[instance].RxRefClkSel);
+	hdmi_dbg("TxSysPllClkSel = %d\n", (int)XVphy_ConfigTable[instance].TxSysPllClkSel);
+	hdmi_dbg("RxSysPllClkSel = %d\n", (int)XVphy_ConfigTable[instance].RxSysPllClkSel);
+	hdmi_dbg("DruIsPresent = %d\n", (int)XVphy_ConfigTable[instance].DruIsPresent);
+	hdmi_dbg("DruRefClkSel = %d\n", (int)XVphy_ConfigTable[instance].DruRefClkSel);
+	hdmi_dbg("Ppc = %d\n", (int)XVphy_ConfigTable[instance].Ppc);
+	hdmi_dbg("TxBufferBypass = %d\n", (int)XVphy_ConfigTable[instance].TxBufferBypass);
+	hdmi_dbg("HdmiFastSwitch = %d\n", (int)XVphy_ConfigTable[instance].HdmiFastSwitch);
+
 	/* Initialize HDMI VPHY */
 	Status = XVphy_HdmiInitialize(&vphydev->xvphy, 0/*QuadID*/,
-		&config, axi_lite_rate);
+		&XVphy_ConfigTable[instance], axi_lite_rate);
 	if (Status != XST_SUCCESS) {
 		printk(KERN_INFO "HDMI VPHY initialization error\n");
 		return XST_FAILURE;
@@ -554,13 +569,14 @@ static int xvphy_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	hdmi_dbg("config.DruIsPresent = %d\n", config.DruIsPresent);
+	hdmi_dbg("config.DruIsPresent = %d\n", XVphy_ConfigTable[instance].DruIsPresent);
 	if (vphydev->xvphy.Config.DruIsPresent == (TRUE)) {
 		hdmi_dbg("DRU reference clock frequency %0d Hz\n\r",
 						XVphy_DruGetRefClkFreqHz(&vphydev->xvphy));
 	}
-
 	hdmi_dbg("HDMI VPHY initialization completed\n");
+	/* probe has succeeded for this instance, increment instance index */
+	instance++;
 	return 0;
 }
 

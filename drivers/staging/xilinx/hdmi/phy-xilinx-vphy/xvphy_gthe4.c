@@ -49,7 +49,6 @@
 
 /******************************* Include Files ********************************/
 
-#include "xparameters.h"
 #include "xvphy_gt.h"
 #if (XPAR_VPHY_0_TRANSCEIVER == XVPHY_GTHE4)
 #include "xstatus.h"
