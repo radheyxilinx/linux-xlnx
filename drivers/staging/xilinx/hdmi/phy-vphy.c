@@ -23,7 +23,7 @@
  */
 
 /* if both both DEBUG and DEBUG_TRACE are defined, trace_printk() is used */
-#define DEBUG
+//#define DEBUG
 //#define DEBUG_TRACE
 
 //#define DEBUG_MUTEX
@@ -132,6 +132,8 @@ struct xvphy_dev {
 	XVphy xvphy;
 	/* AXI Lite clock drives the clock detector */
 	struct clk *axi_lite_clk;
+	/* NI-DRU clock input */
+	struct clk *clkp;
 };
 
 /* given the (Linux) phy handle, return the xvphy */
@@ -423,6 +425,7 @@ static int xvphy_probe(struct platform_device *pdev)
 	struct phy_provider *provider;
 	struct phy *phy;
 	unsigned long axi_lite_rate;
+	unsigned long dru_clk_rate;
 
 	struct resource *res;
 	int port = 0, index = 0;
@@ -525,27 +528,33 @@ static int xvphy_probe(struct platform_device *pdev)
 	/* set axi-lite clk in configuration data */
 	XVphy_ConfigTable[instance].AxiLiteClkFreq = axi_lite_rate;
 
+	/* dru-clk is used for the nidru block for low res support */
+	vphydev->clkp = devm_clk_get(&pdev->dev, "dru-clk");
+	if (IS_ERR(vphydev->clkp)) {
+		ret = PTR_ERR(vphydev->clkp);
+		vphydev->clkp = NULL;
+		if (ret == -EPROBE_DEFER)
+			hdmi_dbg("dru-clk not ready -EPROBE_DEFER\n");
+		if (ret != -EPROBE_DEFER)
+			dev_err(&pdev->dev, "failed to get the nidru clk.\n");
+		return ret;
+	}
+
+	ret = clk_prepare_enable(vphydev->clkp);
+	if (ret) {
+		dev_err(&pdev->dev, "failed to enable nidru clk\n");
+		return ret;
+	}
+
+	dru_clk_rate = clk_get_rate(vphydev->clkp);
+	hdmi_dbg("dru-clk rate = %lu\n", dru_clk_rate);
+
 	provider = devm_of_phy_provider_register(&pdev->dev, xvphy_xlate);
 	if (IS_ERR(provider)) {
 		dev_err(&pdev->dev, "registering provider failed\n");
 			return PTR_ERR(provider);
 	}
 
-	/* dump configuration for XVphy_HdmiInitialize() */
-	hdmi_dbg("XcvrType = %d\n", (int)XVphy_ConfigTable[instance].XcvrType);
-	hdmi_dbg("TxChannels = %d\n", (int)XVphy_ConfigTable[instance].TxChannels);
-	hdmi_dbg("RxChannels = %d\n", (int)XVphy_ConfigTable[instance].RxChannels);
-	hdmi_dbg("TxProtocol = %d\n", (int)XVphy_ConfigTable[instance].TxProtocol);
-	hdmi_dbg("RxProtocol = %d\n", (int)XVphy_ConfigTable[instance].RxProtocol);
-	hdmi_dbg("TxRefClkSel = %d\n", (int)XVphy_ConfigTable[instance].TxRefClkSel);
-	hdmi_dbg("RxRefClkSel = %d\n", (int)XVphy_ConfigTable[instance].RxRefClkSel);
-	hdmi_dbg("TxSysPllClkSel = %d\n", (int)XVphy_ConfigTable[instance].TxSysPllClkSel);
-	hdmi_dbg("RxSysPllClkSel = %d\n", (int)XVphy_ConfigTable[instance].RxSysPllClkSel);
-	hdmi_dbg("DruIsPresent = %d\n", (int)XVphy_ConfigTable[instance].DruIsPresent);
-	hdmi_dbg("DruRefClkSel = %d\n", (int)XVphy_ConfigTable[instance].DruRefClkSel);
-	hdmi_dbg("Ppc = %d\n", (int)XVphy_ConfigTable[instance].Ppc);
-	hdmi_dbg("TxBufferBypass = %d\n", (int)XVphy_ConfigTable[instance].TxBufferBypass);
-	hdmi_dbg("HdmiFastSwitch = %d\n", (int)XVphy_ConfigTable[instance].HdmiFastSwitch);
 
 	/* Initialize HDMI VPHY */
 	Status = XVphy_HdmiInitialize(&vphydev->xvphy, 0/*QuadID*/,

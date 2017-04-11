@@ -13,7 +13,7 @@
  */
 
 /* if both both DEBUG and DEBUG_TRACE are defined, trace_printk() is used */
-#define DEBUG
+//#define DEBUG
 //#define DEBUG_TRACE
 
 //#define DEBUG_MUTEX
@@ -119,8 +119,6 @@ struct xhdmi_device {
 	bool cable_is_connected;
 	bool hdmi_stream_is_up;
 
-	/* NI-DRU clock input */
-	struct clk *clkp;
 	struct clk *axi_lite_clk;
 
 	/* copy of user specified EDID block, if any */
@@ -963,7 +961,6 @@ static int xhdmi_probe(struct platform_device *pdev)
 	const char *fw_edid_name = "xilinx/xilinx-hdmi-rx-edid.bin";
 	unsigned long flags;
 	unsigned long axi_clk_rate;
-	unsigned long dru_clk_rate;
 
 	XV_HdmiRxSs *HdmiRxSsPtr;
 	u32 Status;
@@ -1037,33 +1034,12 @@ static int xhdmi_probe(struct platform_device *pdev)
 	clk_prepare_enable(xhdmi->axi_lite_clk);
 	axi_clk_rate = clk_get_rate(xhdmi->axi_lite_clk);
 
-	if (!xhdmi->clkp) {
-		xhdmi->clkp = devm_clk_get(&pdev->dev, "dru-clk");
-		if (IS_ERR(xhdmi->clkp)) {
-			ret = PTR_ERR(xhdmi->clkp);
-			xhdmi->clkp = NULL;
-			if (ret == -EPROBE_DEFER)
-				hdmi_dbg("dru-clk no ready -EPROBE_DEFER\n");
-			if (ret != -EPROBE_DEFER)
-				dev_err(&pdev->dev, "failed to get the dru-clk.\n");
-			return ret;
-		}
-	}
-
 	/* get HDMI RXSS irq */
 	xhdmi->irq = platform_get_irq(pdev, 0);
 	if (xhdmi->irq <= 0) {
 		dev_err(&pdev->dev, "platform_get_irq() failed\n");
 		return xhdmi->irq;
 	}
-	ret = clk_prepare_enable(xhdmi->clkp);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to enable dru-clk\n");
-		return ret;
-	}
-
-	dru_clk_rate = clk_get_rate(xhdmi->clkp);
-	hdmi_dbg("dru-clk rate = %lu\n", dru_clk_rate);
 
 	for (index = 0; index < 3; index++)
 	{
@@ -1265,7 +1241,6 @@ static int xhdmi_remove(struct platform_device *pdev)
 	v4l2_ctrl_handler_free(&xhdmi->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 	clk_disable_unprepare(xhdmi->clk);
-	clk_disable_unprepare(xhdmi->clkp);
 	hdmi_dbg("removed.\n");
 	return 0;
 }
