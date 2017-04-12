@@ -21,7 +21,7 @@
  */
 
 /* if both both DEBUG and DEBUG_TRACE are defined, trace_printk() is used */
-#define DEBUG
+//#define DEBUG
 //#define DEBUG_TRACE
 
 //#define DEBUG_MUTEX
@@ -999,9 +999,9 @@ static int xilinx_drm_hdmi_parse_of(struct xilinx_drm_hdmi *xhdmi, XV_HdmiTxSs_C
 	}
 
 	/* NOTE new */
-	rc = of_property_read_string(node, "xlnx,pixel-format", &format);
+	rc = of_property_read_string(node, "xlnx,output-fmt", &format);
 	if (rc < 0) {
-		dev_err(xhdmi->dev, "xlnx,pixel-format must be specified\n");
+		dev_err(xhdmi->dev, "xlnx,output-fmt must be specified\n");
 		goto error_dt;
 	} else
 	if (strcmp(format, "rgb") == 0) {
