@@ -1049,8 +1049,10 @@ static int xhdmi_probe(struct platform_device *pdev)
 		if (IS_ERR(xhdmi->phy[index])) {
 			ret = PTR_ERR(xhdmi->phy[index]);
 			xhdmi->phy[index] = NULL;
-			if (ret == -EPROBE_DEFER)
+			if (ret == -EPROBE_DEFER) {
 				hdmi_dbg("xvphy not ready -EPROBE_DEFER\n");
+				return ret;
+			}
 			if (ret != -EPROBE_DEFER)
 				dev_err(xhdmi->dev, "failed to get phy lane %s index %d, error %d\n",
 					phy_name, index, ret);
@@ -1210,7 +1212,7 @@ error:
 error_irq:
 
 error_phy:
-	printk(KERN_INFO "xhdmi_probe() error_phy:\n");
+	printk(KERN_INFO "xhdmirx_probe() error_phy:\n");
 	index = 0;
 	/* release the lanes that we did get, if we did not get all lanes */
 	if (xhdmi->phy[index]) {
@@ -1219,7 +1221,7 @@ error_phy:
 		xhdmi->phy[index] = NULL;
 	}
 error_resource:
-	printk(KERN_INFO "xhdmi_probe() error_resource:\n");
+	printk(KERN_INFO "xhdmirx_probe() error_resource:\n");
 	return ret;
 }
 

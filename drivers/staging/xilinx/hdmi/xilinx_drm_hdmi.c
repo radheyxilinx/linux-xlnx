@@ -1065,8 +1065,10 @@ static int xilinx_drm_hdmi_probe(struct platform_device *pdev)
 		if (IS_ERR(xhdmi->phy[index])) {
 			ret = PTR_ERR(xhdmi->phy[index]);
 			xhdmi->phy[index] = NULL;
-			if (ret == -EPROBE_DEFER)
+			if (ret == -EPROBE_DEFER) {
 				hdmi_dbg("xvphy not ready -EPROBE_DEFER\n");
+				return ret;
+			}
 			if (ret != -EPROBE_DEFER)
 				dev_err(xhdmi->dev, "failed to get phy lane %s index %d, error %d\n",
 					phy_name, index, ret);
