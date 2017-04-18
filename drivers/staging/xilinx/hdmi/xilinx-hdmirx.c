@@ -1016,8 +1016,15 @@ static int xhdmi_probe(struct platform_device *pdev)
 	
 	/* video streaming bus clock */
 	xhdmi->clk = devm_clk_get(xhdmi->dev, "video");
-	if (IS_ERR(xhdmi->clk))
-		return PTR_ERR(xhdmi->clk);
+	if (IS_ERR(xhdmi->clk)) {
+		ret = PTR_ERR(xhdmi->clk);
+		if (ret == -EPROBE_DEFER)
+			hdmi_dbg("video-clk not ready -EPROBE_DEFER\n");
+		if (ret != -EPROBE_DEFER)
+			dev_err(xhdmi->dev, "failed to get video clk\n");
+		return ret;
+	}
+
 	clk_prepare_enable(xhdmi->clk);
 
 	/* AXI lite register bus clock */
@@ -1033,6 +1040,7 @@ static int xhdmi_probe(struct platform_device *pdev)
 
 	clk_prepare_enable(xhdmi->axi_lite_clk);
 	axi_clk_rate = clk_get_rate(xhdmi->axi_lite_clk);
+	hdmi_dbg("AXI Lite clock rate = %lu Hz\n", axi_clk_rate);
 
 	/* get HDMI RXSS irq */
 	xhdmi->irq = platform_get_irq(pdev, 0);

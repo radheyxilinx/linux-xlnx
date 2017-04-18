@@ -56,6 +56,7 @@
 #include "phy-xilinx-vphy/xvidc.h"
 #include "phy-xilinx-vphy/xvidc_edid.h"
 
+#define XVPHY_DRU_REF_CLK_HZ	156250000
 
 
 /* select either trace or printk logging */
@@ -512,6 +513,8 @@ static int xvphy_probe(struct platform_device *pdev)
 	if (IS_ERR(vphydev->axi_lite_clk)) {
 		ret = PTR_ERR(vphydev->axi_lite_clk);
 		vphydev->axi_lite_clk = NULL;
+		if (ret == -EPROBE_DEFER)
+			hdmi_dbg("axi-lite-clk not ready -EPROBE_DEFER\n");
 		if (ret != -EPROBE_DEFER)
 			dev_err(&pdev->dev, "failed to get the axi lite clk.\n");
 		return ret;
@@ -547,7 +550,15 @@ static int xvphy_probe(struct platform_device *pdev)
 	}
 
 	dru_clk_rate = clk_get_rate(vphydev->clkp);
-	hdmi_dbg("dru-clk rate = %lu\n", dru_clk_rate);
+	hdmi_dbg("default dru-clk rate = %lu\n", dru_clk_rate);
+	if (dru_clk_rate != XVPHY_DRU_REF_CLK_HZ) {
+		ret = clk_set_rate(vphydev->clkp, XVPHY_DRU_REF_CLK_HZ);
+		if (ret != 0) {
+			dev_err(&pdev->dev, "Cannot set rate : %d\n", ret);
+		}
+		dru_clk_rate = clk_get_rate(vphydev->clkp);
+		hdmi_dbg("ref dru-clk rate = %lu\n", dru_clk_rate);
+	}
 
 	provider = devm_of_phy_provider_register(&pdev->dev, xvphy_xlate);
 	if (IS_ERR(provider)) {

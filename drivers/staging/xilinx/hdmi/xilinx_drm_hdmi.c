@@ -1125,6 +1125,8 @@ static int xilinx_drm_hdmi_probe(struct platform_device *pdev)
 
 	clk_prepare_enable(xhdmi->axi_lite_clk);
 	axi_clk_rate = clk_get_rate(xhdmi->axi_lite_clk);
+	hdmi_dbg("axi_clk_rate = %lu Hz\n", axi_clk_rate);
+	config.AxiLiteClkFreq = axi_clk_rate;
 
 	/* get irq */
 	xhdmi->irq = platform_get_irq(pdev, 0);
@@ -1156,8 +1158,6 @@ static int xilinx_drm_hdmi_probe(struct platform_device *pdev)
 		hdmi_dbg("no retimer clk specified, assuming no redriver/retimer is used.\n");
 	}
 
-	hdmi_dbg("axi_clk_rate = %lu Hz\n", axi_clk_rate);
-	config.AxiLiteClkFreq = axi_clk_rate;
 
 	platform_set_drvdata(pdev, xhdmi);
 
