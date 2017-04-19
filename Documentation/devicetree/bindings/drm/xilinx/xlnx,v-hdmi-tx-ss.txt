@@ -19,7 +19,9 @@ Required properties:
  - reg: Base address and size of the IP core.
  - interrupts: Interrupt number.
  - interrupts-parent: phandle for interrupt controller.
- 
+ - reset-gpios: Specifier for a GPIO that is used to over-ride PHY tx_refclk_rdy
+   signal. Polarity should be set to ACTIVE_HIGH (0)
+
  - clocks: phandle for axi-lite, video stream and retimer clock
  - clock-names: The identification string, "axi-lite", is always required for
                 the axi-lite clock, "video" is always required for video stream
@@ -46,7 +48,8 @@ clock changes through set_rate(). Tested with dp159.c driver.
 		reg = <0x0 0xa0020000 0x0 0x20000>;
 		interrupts = <0 93 4>;
 		interrupt-parent = <&gic>;
-		
+		reset-gpios = <&gpio 83 0>;
+
 		clocks = <&vid_s_axi_clk>, <&vid_stream_clk>, <&dp159>;
 		clock-names = "axi-lite", "video", "retimer-clk";
 		

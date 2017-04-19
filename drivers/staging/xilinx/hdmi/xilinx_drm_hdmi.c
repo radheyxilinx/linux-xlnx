@@ -44,17 +44,20 @@
 #include <linux/pm.h>
 #include <linux/sysfs.h>
 #include <linux/workqueue.h>
+#include <linux/gpio/consumer.h>
 
 #include "xilinx_drm_drv.h"
-
 #include "linux/phy/phy-vphy.h"
 
 /* baseline driver includes */
 #include "xilinx-hdmi-tx/xv_hdmitxss.h"
 
 
-#define NUM_SUBCORE_IRQ 2
-#define HDMI_MAX_LANES	4
+#define NUM_SUBCORE_IRQ				2
+#define HDMI_MAX_LANES				4
+
+#define XVPHY_TXREFCLK_RDY_LOW		0
+#define XVPHY_TXREFCLK_RDY_HIGH		1
 
 /* select either trace or printk logging */
 #ifdef DEBUG_TRACE
@@ -127,6 +130,9 @@ struct xilinx_drm_hdmi {
 
 	/* retimer that we configure by setting a clock rate */
 	struct clk *retimer_clk;
+
+	/* gpio to force phy freq. change */
+	struct gpio_desc *freqchg_gpio;
 
 	bool cable_connected;
 	bool hdmi_stream_up;
@@ -524,7 +530,7 @@ static void xilinx_drm_hdmi_mode_set(struct drm_encoder *encoder,
 	XVidC_VideoStream *HdmiTxSsVidStreamPtr;
 	u32 TmdsClock = 0;
 	u32 Result;
-	//u32 PixelClock;
+	bool is_gpio_active_low;
 	XVidC_VideoMode VmId;
 
 	struct xilinx_drm_hdmi *xhdmi = to_hdmi(encoder);
@@ -543,10 +549,14 @@ static void xilinx_drm_hdmi_mode_set(struct drm_encoder *encoder,
 
 	drm_mode_debug_printmodeline(mode);
 
-	/* Disable VPhy Clock buffer to force a frequency change event */
-	hdmi_dbg("VPhy Clock Buffer - Disabled\n");
-	XVphy_IBufDsEnable(VphyPtr, 0, XVPHY_DIR_TX, 0);
+	/* Force VPhy Freq. change by overriding si5324 lol signal */
+	is_gpio_active_low = gpiod_is_active_low(xhdmi->freqchg_gpio);
+	hdmi_dbg("TxRef GPIO polarity: Active %s\n", is_gpio_active_low ? "Low" : "High");
 	
+	hdmi_dbg("force phy freq change event: TxRefClkRdy = Low\n");
+	gpiod_set_value_cansleep(xhdmi->freqchg_gpio, (is_gpio_active_low) ?
+				XVPHY_TXREFCLK_RDY_HIGH : XVPHY_TXREFCLK_RDY_LOW);
+
 #ifdef DEBUG
 	hdmi_dbg("mode->clock = %d\n", mode->clock * 1000);
 	hdmi_dbg("mode->crtc_clock = %d\n", mode->crtc_clock * 1000);
@@ -634,9 +644,10 @@ static void xilinx_drm_hdmi_mode_set(struct drm_encoder *encoder,
 		return;
 	}
 
-	/* Enable VPhy Clock buffer - Reacquire Tx Ref Clock and triggers frequency change */
-	hdmi_dbg("VPhy Clock Buffer - Enabled\n");
-	XVphy_IBufDsEnable(VphyPtr, 0, XVPHY_DIR_TX, 1);
+	/* Enable si5324 LOL signal (disable gpio override) */
+	hdmi_dbg("force phy freq change event: TxRefClkRdy = High\n");
+	gpiod_set_value_cansleep(xhdmi->freqchg_gpio, (is_gpio_active_low) ?
+				XVPHY_TXREFCLK_RDY_LOW : XVPHY_TXREFCLK_RDY_HIGH);
 
 	adjusted_mode->clock = VphyPtr->HdmiTxRefClkHz / 1000;
 	hdmi_dbg("adjusted_mode->clock = %u Hz\n", adjusted_mode->clock);
@@ -1158,6 +1169,20 @@ static int xilinx_drm_hdmi_probe(struct platform_device *pdev)
 		hdmi_dbg("no retimer clk specified, assuming no redriver/retimer is used.\n");
 	}
 
+	/* Get gpio to trigger phy freq. change */
+	xhdmi->freqchg_gpio = devm_gpiod_get(&pdev->dev, "reset", GPIOD_OUT_HIGH);
+
+	if (IS_ERR(xhdmi->freqchg_gpio)) {
+		ret = (IS_ERR(xhdmi->freqchg_gpio));
+		if (ret == -EPROBE_DEFER)
+			hdmi_dbg("gpio reset not ready -EPROBE_DEFER\n");
+		if (ret != EPROBE_DEFER)
+			dev_err(&pdev->dev, "Unable to locate reset property in dt\n");
+		return ret;
+	}
+
+	/* default disable override */
+	gpiod_set_value_cansleep(xhdmi->freqchg_gpio, XVPHY_TXREFCLK_RDY_HIGH);
 
 	platform_set_drvdata(pdev, xhdmi);
 
