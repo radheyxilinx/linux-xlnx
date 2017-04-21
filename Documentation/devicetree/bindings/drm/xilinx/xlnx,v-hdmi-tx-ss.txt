@@ -19,8 +19,8 @@ Required properties:
  - reg: Base address and size of the IP core.
  - interrupts: Interrupt number.
  - interrupts-parent: phandle for interrupt controller.
- - reset-gpios: Specifier for a GPIO that is used to over-ride PHY tx_refclk_rdy
-   signal. Polarity should be set to ACTIVE_HIGH (0)
+ - tx_refclk_rdy_en-gpios: Specifier for a GPIO that is used to over-ride PHY
+   tx_refclk_rdy signal from si5324. Polarity should be set to ACTIVE_HIGH (0)
 
  - clocks: phandle for axi-lite, video stream and retimer clock
  - clock-names: The identification string, "axi-lite", is always required for

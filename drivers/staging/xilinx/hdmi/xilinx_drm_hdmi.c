@@ -549,7 +549,10 @@ static void xilinx_drm_hdmi_mode_set(struct drm_encoder *encoder,
 
 	drm_mode_debug_printmodeline(mode);
 
-	/* Force VPhy Freq. change by overriding si5324 lol signal */
+	/* For every mode change phy tx_refxlk_rdy_en signal must be toggled
+	 * (asserted and de-asserted) to reset phy's internal frequency detection
+	 * state machine
+	 */
 	is_gpio_active_low = gpiod_is_active_low(xhdmi->freqchg_gpio);
 	hdmi_dbg("TxRef GPIO polarity: Active %s\n", is_gpio_active_low ? "Low" : "High");
 	
@@ -1169,20 +1172,21 @@ static int xilinx_drm_hdmi_probe(struct platform_device *pdev)
 		hdmi_dbg("no retimer clk specified, assuming no redriver/retimer is used.\n");
 	}
 
-	/* Get gpio to trigger phy freq. change */
-	xhdmi->freqchg_gpio = devm_gpiod_get(&pdev->dev, "reset", GPIOD_OUT_HIGH);
+	/* Get gpio to trigger phy freq. change (overrides si53xx LOL output) */
+	xhdmi->freqchg_gpio = devm_gpiod_get(&pdev->dev, "tx_refclk_rdy_en", GPIOD_OUT_HIGH);
 
 	if (IS_ERR(xhdmi->freqchg_gpio)) {
 		ret = (IS_ERR(xhdmi->freqchg_gpio));
 		if (ret == -EPROBE_DEFER)
-			hdmi_dbg("gpio reset not ready -EPROBE_DEFER\n");
+			hdmi_dbg("gpio tx_refclk_rdy_en not ready -EPROBE_DEFER\n");
 		if (ret != EPROBE_DEFER)
-			dev_err(&pdev->dev, "Unable to locate reset property in dt\n");
+			dev_err(&pdev->dev, "ERROR failed to locate gpio tx_refclk_rdy_en in dt\n");
 		return ret;
 	}
 
 	/* default disable override */
 	gpiod_set_value_cansleep(xhdmi->freqchg_gpio, XVPHY_TXREFCLK_RDY_HIGH);
+	hdmi_dbg("acquired tx_refclk_rdy_en gpio\n");
 
 	platform_set_drvdata(pdev, xhdmi);
 
