@@ -16,29 +16,28 @@
  * GNU General Public License for more details.
  */
 
-#include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_gem_cma_helper.h>
+#include <drm/drmP.h>
 
 #include <linux/device.h>
 #include <linux/dmaengine.h>
+#include <linux/dma/xilinx_dma.h>
 #include <linux/of_dma.h>
 #include <linux/platform_device.h>
-#include <linux/dma/xilinx_dma.h>
 
 /* drm component libs */
 #include "xilinx_drm_dp_sub.h"
 #include "xilinx_drm_drv.h"
 #include "xilinx_drm_fb.h"
 #include "xilinx_drm_plane.h"
-#include "crtc/mixer/drm/xilinx_drm_mixer.h"
 
 /* hardware layer libs */
+#include "crtc/mixer/drm/xilinx_drm_mixer.h"
 #include "xilinx_cresample.h"
 #include "xilinx_osd.h"
 #include "xilinx_rgb2yuv.h"
-
 
 /* set plane dpms */
 void xilinx_drm_plane_dpms(struct drm_plane *base_plane, int dpms)
@@ -158,7 +157,6 @@ void xilinx_drm_plane_commit(struct drm_plane *base_plane)
 		struct xilinx_drm_plane_dma *dma = &plane->dma[i];
 
 		if (dma->chan && dma->is_active) {
-
 #ifdef CONFIG_XILINX_FRMBUF
 			/* set first channel private data */
 			dma->chan->private = &dma_config;
@@ -204,7 +202,7 @@ int xilinx_drm_plane_mode_set(struct drm_plane *base_plane,
 		xilinx_rgb2yuv_configure(plane->rgb2yuv, crtc_w, crtc_h);
 
 	DRM_DEBUG_KMS("h: %d(%d), v: %d(%d)\n",
-			src_w, crtc_x, src_h, crtc_y);
+		      src_w, crtc_x, src_h, crtc_y);
 	DRM_DEBUG_KMS("bpp: %d\n", fb->bits_per_pixel / 8);
 
 	hsub = drm_format_horz_chroma_subsampling(fb->pixel_format);
@@ -462,26 +460,25 @@ static int xilinx_drm_plane_set_property(struct drm_plane *base_plane,
 	struct xilinx_drm_plane *plane = to_xilinx_plane(base_plane);
 	struct xilinx_drm_plane_manager *manager = plane->manager;
 
-	if (property == manager->zpos_prop)
+	if (property == manager->zpos_prop) {
 		xilinx_drm_plane_set_zpos(base_plane, val);
 
-	else if (property == manager->alpha_prop)
+	} else if (property == manager->alpha_prop) {
 		xilinx_drm_plane_set_alpha(base_plane, val);
 
-	else if (property == manager->alpha_enable_prop)
+	} else if (property == manager->alpha_enable_prop) {
 		xilinx_drm_plane_enable_alpha(base_plane, val);
 
-	else if (manager->mixer) {
+	} else if (manager->mixer) {
 		int ret;
 
 		ret = xilinx_drm_mixer_set_plane_property(plane,
-							property, val);
+							  property, val);
 		if (ret)
 			return ret;
-	}
-
-	else
+	} else {
 		return -EINVAL;
+	}
 
 	drm_object_property_set_value(&base_plane->base, property, val);
 
@@ -881,17 +878,15 @@ xilinx_drm_plane_create(struct xilinx_drm_plane_manager *manager,
 			plane->format = manager->format;
 	}
 
-
 	if (manager->mixer) {
-
 		type = DRM_PLANE_TYPE_OVERLAY;
 
 		layer_node =
 			of_parse_phandle(plane_node, "xlnx,mixer-layer", 0);
 
 
-		ret = xilinx_drm_create_mixer_layer_plane(manager,
-						      plane, layer_node);
+		ret = xilinx_drm_create_mixer_layer_plane(manager, plane,
+							  layer_node);
 
 		if (ret)
 			goto err_init;
@@ -901,9 +896,7 @@ xilinx_drm_plane_create(struct xilinx_drm_plane_manager *manager,
 
 		if (plane->mixer_layer == manager->mixer->drm_primary_layer)
 			type = DRM_PLANE_TYPE_PRIMARY;
-
 	}
-
 
 	if (manager->dp_sub) {
 		plane->dp_layer = xilinx_drm_dp_sub_layer_get(manager->dp_sub,
@@ -1046,7 +1039,7 @@ xilinx_drm_plane_init_manager(struct xilinx_drm_plane_manager *manager)
 		if (ret || (drm_format != manager->format)) {
 			dev_err(manager->drm->dev,
 		     "Plane manager format != output video format for mixer\n");
-			ret = -EINVAL;
+			return -EINVAL;
 		}
 
 		if (mixer->hw_logo_layer) {

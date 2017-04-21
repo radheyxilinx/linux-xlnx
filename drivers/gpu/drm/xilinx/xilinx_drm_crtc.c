@@ -608,13 +608,13 @@ struct drm_crtc *xilinx_drm_crtc_create(struct drm_device *drm)
 	/* permit flexible placement of primary plane among planes## in dts */
 	if (primary_plane->type != DRM_PLANE_TYPE_PRIMARY)
 		primary_plane = xilinx_find_plane(crtc->plane_manager,
-						DRM_PLANE_TYPE_PRIMARY);
+						  DRM_PLANE_TYPE_PRIMARY);
 
 	if (!primary_plane)
 		return ERR_PTR(-ENODEV);
 
 	cursor_plane = xilinx_find_plane(crtc->plane_manager,
-						DRM_PLANE_TYPE_CURSOR);
+					 DRM_PLANE_TYPE_CURSOR);
 
 	/* initialize drm crtc */
 	ret = drm_crtc_init_with_planes(drm, &crtc->base,
@@ -638,7 +638,6 @@ err_plane:
 	xilinx_drm_plane_remove_manager(crtc->plane_manager);
 	return ERR_PTR(ret);
 }
-
 
 static struct drm_plane *
 xilinx_find_plane(struct xilinx_drm_plane_manager *manager,

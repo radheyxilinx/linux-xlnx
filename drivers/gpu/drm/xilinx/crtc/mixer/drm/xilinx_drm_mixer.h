@@ -55,7 +55,7 @@ struct xilinx_drm_mixer {
  * @returns reference to drm mixer instance struct; err pointer otherwise
  *
  */
-struct xilinx_drm_mixer * xilinx_drm_mixer_probe(struct device *dev,
+struct xilinx_drm_mixer *xilinx_drm_mixer_probe(struct device *dev,
 				struct device_node *node,
 				struct xilinx_drm_plane_manager *manager);
 
@@ -293,7 +293,7 @@ int xilinx_drm_mixer_set_layer_dimensions(struct xilinx_drm_plane *plane,
  * @note Does not apply to logo layer.  Logo layer data is contained within the
  *	struct xv_mixer instance.
  */
-struct xv_mixer_layer_data * xilinx_drm_mixer_get_layer(struct xv_mixer *mixer,
+struct xv_mixer_layer_data *xilinx_drm_mixer_get_layer(struct xv_mixer *mixer,
 						enum xv_mixer_layer_id id);
 
 
