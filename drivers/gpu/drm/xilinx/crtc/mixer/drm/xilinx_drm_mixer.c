@@ -318,6 +318,7 @@ int xilinx_drm_mixer_set_plane(struct xilinx_drm_plane *plane,
 
 		if (mixer->drm_primary_layer == mixer->hw_master_layer) {
 			xilinx_mixer_layer_disable(mixer_hw, layer_id);
+			msleep(50);
 
 			ret = xilinx_mixer_set_active_area(mixer_hw,
 							   src_w, src_h);
@@ -460,7 +461,7 @@ int xilinx_drm_mixer_set_layer_scale(struct xilinx_drm_plane *plane,
 		return -EINVAL;
 	}
 	xilinx_drm_mixer_layer_disable(plane);
-	mdelay(50);
+	msleep(50);
 
 	ret = xilinx_mixer_set_layer_scaling(mixer_hw, layer->id, val);
 	if (ret)
@@ -545,18 +546,37 @@ int xilinx_drm_mixer_set_layer_dimensions(struct xilinx_drm_plane *plane,
 	struct xv_mixer *mixer_hw = to_xv_mixer_hw(plane);
 	struct xv_mixer_layer_data *layer_data;
 	enum xv_mixer_layer_id layer_id;
+	bool disable_req = false;
 	int ret = 0;
 
 	layer_data = plane->mixer_layer;
 	layer_id = layer_data->id;
 
+	if (mixer_layer_height(layer_data) != height ||
+	    mixer_layer_width(layer_data) != width)
+		disable_req = true;
+
+
+	/* disable any layers necessary */
+	if (disable_req) {
+		if (mixer->drm_primary_layer == layer_data)
+			xilinx_mixer_layer_disable(mixer_hw,
+						   XVMIX_LAYER_MASTER);
+
+		if (layer_id != XVMIX_LAYER_MASTER &&
+		    layer_id < XVMIX_LAYER_ALL) {
+			xilinx_mixer_layer_disable(mixer_hw, layer_id);
+		} else {
+			DRM_DEBUG_KMS("Invalid mixer layer id %u\n", layer_id);
+			return -EINVAL;
+		}
+		msleep(50);
+	}
+
 	if (mixer->drm_primary_layer == layer_data) {
 		/* likely unneeded but, just to be sure...*/
 		crtc_x = 0;
 		crtc_y = 0;
-
-		xilinx_mixer_layer_disable(mixer_hw, XVMIX_LAYER_MASTER);
-		mdelay(50);
 
 		ret = xilinx_mixer_set_active_area(mixer_hw,
 						   width, height);
@@ -568,13 +588,6 @@ int xilinx_drm_mixer_set_layer_dimensions(struct xilinx_drm_plane *plane,
 	}
 
 	if (layer_id != XVMIX_LAYER_MASTER && layer_id < XVMIX_LAYER_ALL) {
-		/* only disable plane if width or height is altered */
-		if (mixer_layer_width(layer_data) != width ||
-		    mixer_layer_height(layer_data) != height) {
-			xilinx_drm_mixer_layer_disable(plane);
-			mdelay(50);
-		}
-
 		ret = xilinx_mixer_set_layer_window(mixer_hw, layer_id,
 						    crtc_x, crtc_y,
 						    width, height, stride);
