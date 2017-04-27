@@ -8,7 +8,9 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/delay.h>
 #include <linux/device.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -19,7 +21,7 @@
 #include <media/v4l2-subdev.h>
 
 #include "xilinx-vip.h"
-#include "xilinx-csc.h"
+#include "xilinx-vpss-csc.h"
 
 enum xcsc_color_fmt {
 	XVIDC_CSF_RGB = 0,
@@ -69,7 +71,9 @@ struct xcsc_dev {
 	s32 green_gain_active;
 	s32 blue_gain_active;
 	s32 k_hw[3][4];
-	bool probe_done;
+	s32 clip_max;
+	s32 clamp_min;
+	struct gpio_desc *rst_gpio;
 };
 
 static u32 xcsc_read(struct xcsc_dev *xcsc, u32 reg)
@@ -82,7 +86,66 @@ static u32 xcsc_read(struct xcsc_dev *xcsc, u32 reg)
 	return data;
 }
 
-static void xcsc_write(struct xcsc_dev *xcsc, u32 reg, u32 data)
+static void xcsc_get_coeff(struct xcsc_dev *xcsc, s32 C[3][4])
+{
+	C[0][0] = xcsc_read(xcsc, XV_CSC_K11);
+	C[0][1] = xcsc_read(xcsc, XV_CSC_K12);
+	C[0][2] = xcsc_read(xcsc, XV_CSC_K13);
+	C[1][0] = xcsc_read(xcsc, XV_CSC_K21);
+	C[1][1] = xcsc_read(xcsc, XV_CSC_K22);
+	C[1][2] = xcsc_read(xcsc, XV_CSC_K23);
+	C[2][0] = xcsc_read(xcsc, XV_CSC_K31);
+	C[2][1] = xcsc_read(xcsc, XV_CSC_K32);
+	C[2][2] = xcsc_read(xcsc, XV_CSC_K33);
+	C[0][3] = xcsc_read(xcsc, XV_CSC_ROFFSET);
+	C[1][3] = xcsc_read(xcsc, XV_CSC_GOFFSET);
+	C[2][3] = xcsc_read(xcsc, XV_CSC_BOFFSET);
+}
+
+static void xcsc_print_coeff(struct xcsc_dev *xcsc)
+{
+	s32 C[3][4];
+
+	xcsc_get_coeff(xcsc, C);
+
+	dev_dbg(xcsc->xvip.dev,
+		"-------------CSC Coeff Dump Start------\n");
+	dev_dbg(xcsc->xvip.dev,
+		" R row : %5d  %5d  %5d\n",
+		 (s16)C[0][0], (s16)C[0][1], (s16)C[0][2]);
+	dev_dbg(xcsc->xvip.dev,
+		" G row : %5d  %5d  %5d\n",
+		 (s16)C[1][0], (s16)C[1][1], (s16)C[1][2]);
+	dev_dbg(xcsc->xvip.dev,
+		" B row : %5d  %5d  %5d\n",
+		 (s16)C[2][0], (s16)C[2][1], (s16)C[2][2]);
+	dev_dbg(xcsc->xvip.dev,
+		"Offset : %5d  %5d  %5d\n",
+		 (s16)C[0][3], (s16)C[1][3], (s16)C[2][3]);
+	dev_dbg(xcsc->xvip.dev,
+		"ClampMin: %3d  ClipMax %3d",
+		 xcsc_read(xcsc, XV_CSC_CLAMPMIN),
+		 xcsc_read(xcsc, XV_CSC_CLIPMAX));
+	dev_dbg(xcsc->xvip.dev,
+		"-------------CSC Coeff Dump Stop-------\n");
+}
+
+static void xcsc_print_k_hw(struct xcsc_dev *xcsc)
+{
+	dev_dbg(xcsc->xvip.dev, "-------------CSC Driver k_hw[][] Dump------------\n");
+	dev_dbg(xcsc->xvip.dev, "k_hw[0][x] R row : %5d  %5d  %5d\n",
+		xcsc->k_hw[0][0],  xcsc->k_hw[0][1],  xcsc->k_hw[0][2]);
+	dev_dbg(xcsc->xvip.dev, "k_hw[1][x] G row : %5d  %5d  %5d\n",
+		xcsc->k_hw[1][0],  xcsc->k_hw[1][1],  xcsc->k_hw[1][2]);
+	dev_dbg(xcsc->xvip.dev, "k_hw[2][x] B row : %5d  %5d  %5d\n",
+		xcsc->k_hw[2][0],  xcsc->k_hw[2][1],  xcsc->k_hw[2][2]);
+	dev_dbg(xcsc->xvip.dev, "k_hw[x][3] Offset : %5d  %5d  %5d\n",
+		xcsc->k_hw[0][3],  xcsc->k_hw[1][3],  xcsc->k_hw[2][3]);
+	dev_dbg(xcsc->xvip.dev, "-------------------------------------------------\n");
+}
+
+static void xcsc_write(struct xcsc_dev *xcsc, u32 reg,
+		       u32 data, const char *func)
 {
 	u32 rb;
 
@@ -92,9 +155,115 @@ static void xcsc_write(struct xcsc_dev *xcsc, u32 reg, u32 data)
 	rb = xcsc_read(xcsc, reg);
 	if (rb != data) {
 		dev_dbg(xcsc->xvip.dev,
-			"Wrote 0x%x does not match read back 0x%x",
-				data, rb);
+			"%s : Wrote 0x%x does not match read back 0x%x for reg 0x%x",
+			func, data, rb, reg);
+		xcsc_print_k_hw(xcsc);
+		xcsc_print_coeff(xcsc);
 	}
+}
+
+static void xcsc_write_rgb_3x3(struct xcsc_dev *xcsc)
+{
+	/* Write Matrix Coefficients */
+	xcsc_write(xcsc, XV_CSC_K11, xcsc->k_hw[0][0], __func__);
+	xcsc_write(xcsc, XV_CSC_K12, xcsc->k_hw[0][1], __func__);
+	xcsc_write(xcsc, XV_CSC_K13, xcsc->k_hw[0][2], __func__);
+	xcsc_write(xcsc, XV_CSC_K21, xcsc->k_hw[1][0], __func__);
+	xcsc_write(xcsc, XV_CSC_K22, xcsc->k_hw[1][1], __func__);
+	xcsc_write(xcsc, XV_CSC_K23, xcsc->k_hw[1][2], __func__);
+	xcsc_write(xcsc, XV_CSC_K31, xcsc->k_hw[2][0], __func__);
+	xcsc_write(xcsc, XV_CSC_K32, xcsc->k_hw[2][1], __func__);
+	xcsc_write(xcsc, XV_CSC_K33, xcsc->k_hw[2][2], __func__);
+}
+
+static void xcsc_write_rgb_offset(struct xcsc_dev *xcsc)
+{
+	/* Write RGB Offsets */
+	xcsc_write(xcsc, XV_CSC_ROFFSET, xcsc->k_hw[0][3], __func__);
+	xcsc_write(xcsc, XV_CSC_GOFFSET, xcsc->k_hw[1][3], __func__);
+	xcsc_write(xcsc, XV_CSC_BOFFSET, xcsc->k_hw[2][3], __func__);
+}
+
+static void xcsc_write_coeff(struct xcsc_dev *xcsc)
+{
+	xcsc_write_rgb_3x3(xcsc);
+	xcsc_write_rgb_offset(xcsc);
+}
+
+static void xcsc_rgb_to_ycrcb(struct xcsc_dev *xcsc,
+			      s32 *clamp_min, s32 *clip_max)
+{
+	s32 bpc_scale = (1 << (xcsc->color_depth - 8));
+
+	switch (xcsc->std_out) {
+	case XVIDC_BT_709:
+		dev_info(xcsc->xvip.dev, "Performing RGB to YCrCb BT 709");
+		xcsc->k_hw[0][0] =
+			(1826 * XV_CSC_SCALE_FACTOR) / XV_CSC_DIVISOR;
+		xcsc->k_hw[0][1] =
+			(6142 * XV_CSC_SCALE_FACTOR) / XV_CSC_DIVISOR;
+		xcsc->k_hw[0][2] =
+			(620 * XV_CSC_SCALE_FACTOR) / XV_CSC_DIVISOR;
+		xcsc->k_hw[1][0] =
+			(-1006 * XV_CSC_SCALE_FACTOR) / XV_CSC_DIVISOR;
+		xcsc->k_hw[1][1] =
+			(-3386 * XV_CSC_SCALE_FACTOR) / XV_CSC_DIVISOR;
+		xcsc->k_hw[1][2] =
+			(4392 * XV_CSC_SCALE_FACTOR) / XV_CSC_DIVISOR;
+		xcsc->k_hw[2][0] =
+			(4392 * XV_CSC_SCALE_FACTOR) / XV_CSC_DIVISOR;
+		xcsc->k_hw[2][1] =
+			(-3989 * XV_CSC_SCALE_FACTOR) / XV_CSC_DIVISOR;
+		xcsc->k_hw[2][2] =
+			(-403 * XV_CSC_SCALE_FACTOR) / XV_CSC_DIVISOR;
+		xcsc->k_hw[0][3] = 16 * bpc_scale;
+		xcsc->k_hw[1][3] = 128 * bpc_scale;
+		xcsc->k_hw[2][3] = 128 * bpc_scale;
+		break;
+	default:
+		dev_err(xcsc->xvip.dev,
+			"%s : Unsupported Output Standard", __func__);
+	}
+
+	*clamp_min = 0;
+	*clip_max = ((1 <<  xcsc->color_depth) - 1);
+}
+
+static int xcsc_set_coeff(struct xcsc_dev *xcsc)
+{
+	u32 color_in, color_out;
+
+	/* Write In and Out Video Formats */
+	color_in = xcsc->formats[XVIP_PAD_SINK].code;
+	color_out = xcsc->formats[XVIP_PAD_SOURCE].code;
+	if (color_in != MEDIA_BUS_FMT_RBG888_1X24 &&
+	    xcsc->cft_in != XVIDC_CSF_RGB) {
+		dev_err(xcsc->xvip.dev, "Unsupported sink pad media code");
+		xcsc->cft_in = XVIDC_CSF_RGB;
+		xcsc->formats[XVIP_PAD_SINK].code = MEDIA_BUS_FMT_RBG888_1X24;
+	}
+
+	if (color_out == MEDIA_BUS_FMT_RBG888_1X24) {
+		xcsc->cft_out = XVIDC_CSF_RGB;
+	} else if (color_out == MEDIA_BUS_FMT_VUY8_1X24) {
+		xcsc->cft_out = XVIDC_CSF_YCRCB_444;
+		xcsc_rgb_to_ycrcb(xcsc, &xcsc->clamp_min, &xcsc->clip_max);
+	} else {
+		dev_err(xcsc->xvip.dev, "Unsupported source pad media code");
+		xcsc->cft_out = XVIDC_CSF_RGB;
+		xcsc->formats[XVIP_PAD_SOURCE].code = MEDIA_BUS_FMT_RBG888_1X24;
+	}
+
+	xcsc_write(xcsc, XV_CSC_INVIDEOFORMAT, xcsc->cft_in, __func__);
+	xcsc_write(xcsc, XV_CSC_OUTVIDEOFORMAT, xcsc->cft_out, __func__);
+
+	xcsc_write_coeff(xcsc);
+
+	xcsc_write(xcsc, XV_CSC_CLIPMAX, xcsc->clip_max, __func__);
+	xcsc_write(xcsc, XV_CSC_CLAMPMIN, xcsc->clamp_min, __func__);
+
+	xcsc_print_coeff(xcsc);
+	return 0;
 }
 
 static inline struct xcsc_dev *to_csc(struct v4l2_subdev *subdev)
@@ -104,8 +273,8 @@ static inline struct xcsc_dev *to_csc(struct v4l2_subdev *subdev)
 
 static struct v4l2_mbus_framefmt *
 __xcsc_get_pad_format(struct xcsc_dev *xcsc,
-			struct v4l2_subdev_pad_config *cfg,
-			unsigned int pad, u32 which)
+		      struct v4l2_subdev_pad_config *cfg,
+		      unsigned int pad, u32 which)
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
@@ -149,101 +318,64 @@ static void xcsc_set_default_state(struct xcsc_dev *xcsc)
 	xcsc->k_hw[0][3] = 0;
 	xcsc->k_hw[1][3] = 0;
 	xcsc->k_hw[2][3] = 0;
+	xcsc->clamp_min = 0;
+	xcsc->clip_max = ((1 << xcsc->color_depth) - 1);
+
+	xcsc_write(xcsc, XV_CSC_INVIDEOFORMAT, xcsc->cft_in, __func__);
+	xcsc_write(xcsc, XV_CSC_OUTVIDEOFORMAT, xcsc->cft_out, __func__);
+
+	xcsc_write_coeff(xcsc);
+
+	xcsc_write(xcsc, XV_CSC_CLIPMAX, xcsc->clip_max, __func__);
+	xcsc_write(xcsc, XV_CSC_CLAMPMIN, xcsc->clamp_min, __func__);
 }
 
-static void xcsc_rgb_to_ycrcb
-(struct xcsc_dev *xcsc, s32 *clamp_min, s32 *clip_max)
+/****************************************************************************
+ * This function multiplies Matrices. (Utility function)
+ *
+ * @param  K1 input matrix
+ * @param  K2 input matrix
+ * @param  Kout is the output matrix (K1 * K2)
+ *
+ * @return Matrix multiplication via Kout
+ *
+ ****************************************************************************/
+static void xcsc_matrix_multiply(s32 K1[3][4], s32 K2[3][4], s32 kout[3][4])
 {
-	s32 bpc_scale = (1 << (xcsc->color_depth - 8));
+	s32 A, B, C, D, E, F, G, H, I, J, K, L, M, N;
+	s32 O, P, Q, R, S, T, U, V, W, X;
 
-	switch (xcsc->std_out) {
-	case XVIDC_BT_709:
-		dev_info(xcsc->xvip.dev, "Performing RGB to YCrCb BT 709");
-		xcsc->k_hw[0][0] = (1826 * XV_CSC_SCALE_FACTOR)/XV_CSC_DIVISOR;
-		xcsc->k_hw[0][1] = (6142 * XV_CSC_SCALE_FACTOR)/XV_CSC_DIVISOR;
-		xcsc->k_hw[0][2] = (620 * XV_CSC_SCALE_FACTOR)/XV_CSC_DIVISOR;
-		xcsc->k_hw[1][0] = (-1006 * XV_CSC_SCALE_FACTOR)/XV_CSC_DIVISOR;
-		xcsc->k_hw[1][1] = (-3386 * XV_CSC_SCALE_FACTOR)/XV_CSC_DIVISOR;
-		xcsc->k_hw[1][2] = (4392 * XV_CSC_SCALE_FACTOR)/XV_CSC_DIVISOR;
-		xcsc->k_hw[2][0] = (4392 * XV_CSC_SCALE_FACTOR)/XV_CSC_DIVISOR;
-		xcsc->k_hw[2][1] = (-3989 * XV_CSC_SCALE_FACTOR)/XV_CSC_DIVISOR;
-		xcsc->k_hw[2][2] = (-403 * XV_CSC_SCALE_FACTOR)/XV_CSC_DIVISOR;
-		xcsc->k_hw[0][3] = 16 * bpc_scale;
-		xcsc->k_hw[1][3] = 128 * bpc_scale;
-		xcsc->k_hw[2][3] = 128 * bpc_scale;
-		break;
-	default:
-		dev_err(xcsc->xvip.dev,
-			"%s : Unsupported Output Standard", __func__);
-	}
+	A = K1[0][0]; B = K1[0][1]; C = K1[0][2]; J = K1[0][3];
+	D = K1[1][0]; E = K1[1][1]; F = K1[1][2]; K = K1[1][3];
+	G = K1[2][0]; H = K1[2][1]; I = K1[2][2]; L = K1[2][3];
 
-	*clamp_min = 0;
-	*clip_max = ((1 <<  xcsc->color_depth)-1);
-}
+	M = K2[0][0]; N = K2[0][1]; O = K2[0][2]; V = K2[0][3];
+	P = K2[1][0]; Q = K2[1][1]; R = K2[1][2]; W = K2[1][3];
+	S = K2[2][0]; T = K2[2][1]; U = K2[2][2]; X = K2[2][3];
 
-static void xcsc_matrix_multiply(s32 K1[3][4], s32 K2[3][4], s32 K3[3][4])
-{
-	s32 a, b, c, d, e, f, g, h, i, j, k, l;
-	s32 m, n, o, p, q, r, s, t, u, v, w, x;
-	const s32 sc_fac = XV_CSC_SCALE_FACTOR;
-
-	/* Matrix K1 */
-	a = K1[0][0];	b = K1[0][1];	c = K1[0][2];
-	d = K1[1][0];	e = K1[1][1];	f = K1[1][2];
-	g = K1[2][0];	h = K1[2][1];	i = K1[2][2];
-	/* Matrix K1 RGB Offsets */
-	j = K1[0][3];	k = K1[2][3];	l = K1[2][3];
-
-	/* Matrix K2 */
-	m = K2[0][0];	n = K2[0][1];	o = K2[0][2];
-	p = K2[1][0];	q = K2[1][1];	r = K2[1][2];
-	s = K2[2][0];	t = K2[2][1];	u = K2[2][2];
-	/* Matrix K2 RGB Offsets */
-	v = K2[0][3];	w = K2[2][3];	x = K2[2][3];
-
-	K3[0][0] = (m*a + n*d + o*g)/sc_fac;
-	K3[0][1] = (m*b + n*e + o*h)/sc_fac;
-	K3[0][2] = (m*c + n*f + o*i)/sc_fac;
-	K3[1][0] = (p*a + q*d + r*g)/sc_fac;
-	K3[1][1] = (p*b + q*e + r*h)/sc_fac;
-	K3[1][2] = (p*c + q*f + r*i)/sc_fac;
-	K3[2][0] = (s*a + t*d + u*g)/sc_fac;
-	K3[2][1] = (s*b + t*e + u*h)/sc_fac;
-	K3[2][2] = (s*c + t*f + u*i)/sc_fac;
-	K3[0][3] = ((m*j + n*k + o*l)/sc_fac) + v;
-	K3[1][3] = ((p*j + q*k + r*l)/sc_fac) + w;
-	K3[2][3] = ((s*j + t*k + u*l)/sc_fac) + x;
-}
-
-static void xcsc_write_coeff(struct xcsc_dev *xcsc)
-{
-	/* Write Matrix Coefficients */
-	xcsc_write(xcsc, XV_CSC_K11, xcsc->k_hw[0][0]);
-	xcsc_write(xcsc, XV_CSC_K12, xcsc->k_hw[0][1]);
-	xcsc_write(xcsc, XV_CSC_K13, xcsc->k_hw[0][2]);
-	xcsc_write(xcsc, XV_CSC_K21, xcsc->k_hw[1][0]);
-	xcsc_write(xcsc, XV_CSC_K22, xcsc->k_hw[1][1]);
-	xcsc_write(xcsc, XV_CSC_K23, xcsc->k_hw[1][2]);
-	xcsc_write(xcsc, XV_CSC_K31, xcsc->k_hw[2][0]);
-	xcsc_write(xcsc, XV_CSC_K32, xcsc->k_hw[2][1]);
-	xcsc_write(xcsc, XV_CSC_K33, xcsc->k_hw[2][2]);
-
-	/* Write RGB Offsets */
-	xcsc_write(xcsc, XV_CSC_ROFFSET, xcsc->k_hw[0][3]);
-	xcsc_write(xcsc, XV_CSC_GOFFSET, xcsc->k_hw[1][3]);
-	xcsc_write(xcsc, XV_CSC_BOFFSET, xcsc->k_hw[2][3]);
+	kout[0][0] = (M * A + N * D + O * G) / (XV_CSC_DIVISOR);
+	kout[0][1] = (M * B + N * E + O * H) / (XV_CSC_DIVISOR);
+	kout[0][2] = (M * C + N * F + O * I) / (XV_CSC_DIVISOR);
+	kout[1][0] = (P * A + Q * D + R * G) / (XV_CSC_DIVISOR);
+	kout[1][1] = (P * B + Q * E + R * H) / (XV_CSC_DIVISOR);
+	kout[1][2] = (P * C + Q * F + R * I) / (XV_CSC_DIVISOR);
+	kout[2][0] = (S * A + T * D + U * G) / (XV_CSC_DIVISOR);
+	kout[2][1] = (S * B + T * E + U * H) / (XV_CSC_DIVISOR);
+	kout[2][2] = (S * C + T * F + U * I) / (XV_CSC_DIVISOR);
+	kout[0][3] = ((M * J + N * K + O * L) / (XV_CSC_DIVISOR)) + V;
+	kout[1][3] = ((P * J + Q * K + R * L) / (XV_CSC_DIVISOR)) + W;
+	kout[2][3] = ((S * J + T * K + U * L) / (XV_CSC_DIVISOR)) + X;
 }
 
 static void xcsc_set_brightness(struct xcsc_dev *xcsc)
 {
 	int i, j;
 
-	dev_info(xcsc->xvip.dev,
+	dev_dbg(xcsc->xvip.dev,
 		"%s : Brightness %d Brightness Active %d",
 		__func__,
-		((xcsc->brightness - 20)/2),
-		((xcsc->brightness_active - 20)/2)
-		);
+		((xcsc->brightness - 20) / 2),
+		((xcsc->brightness_active - 20) / 2));
 	if (xcsc->brightness == xcsc->brightness_active)
 		return;
 	for (i = 0; i < XV_CSC_K_MAX_ROWS; i++) {
@@ -254,6 +386,7 @@ static void xcsc_set_brightness(struct xcsc_dev *xcsc)
 		}
 	}
 	xcsc->brightness_active = xcsc->brightness;
+	xcsc_write_rgb_3x3(xcsc);
 }
 
 static void xcsc_set_contrast(struct xcsc_dev *xcsc)
@@ -261,82 +394,101 @@ static void xcsc_set_contrast(struct xcsc_dev *xcsc)
 	s32 contrast;
 
 	contrast = xcsc->contrast - xcsc->contrast_active;
-	dev_info(xcsc->xvip.dev,
+	dev_dbg(xcsc->xvip.dev,
 		"%s : Contrast Difference %d", __func__, contrast);
-	if (contrast == 0)
-		return;
+
 	/* Update RGB Offsets */
-	xcsc->k_hw[0][3] += (contrast * XV_CSC_SCALE_FACTOR);
-	xcsc->k_hw[1][3] += (contrast * XV_CSC_SCALE_FACTOR);
-	xcsc->k_hw[2][3] += (contrast * XV_CSC_SCALE_FACTOR);
-	dev_info(xcsc->xvip.dev,
-		"%s : Offsets R %d G %d B %d", __func__,
-		xcsc->k_hw[0][3], xcsc->k_hw[1][3], xcsc->k_hw[2][3]);
+	xcsc->k_hw[0][3] +=
+		XV_CSC_RGB_OFFSET_WR(contrast * XV_CSC_SCALE_FACTOR);
+	xcsc->k_hw[1][3] +=
+		XV_CSC_RGB_OFFSET_WR(contrast * XV_CSC_SCALE_FACTOR);
+	xcsc->k_hw[2][3] +=
+		XV_CSC_RGB_OFFSET_WR(contrast * XV_CSC_SCALE_FACTOR);
 	xcsc->contrast_active = xcsc->contrast;
+	xcsc_write_rgb_offset(xcsc);
 }
 
 static void xcsc_set_saturation(struct xcsc_dev *xcsc)
 {
-	s32 K1[3][4], K2[3][4], K3[3][4];
+	s32 K1[3][4], K2[3][4];
 	s32 rwgt, gwgt, bwgt;
-	s32 a, b, c, d, e, f, g, h, i;
+	s32 a, b, c;
+	s32 d, e, f;
+	s32 g, h, i;
 	s32 sat = xcsc->saturation;
 	s32 sat_act = xcsc->saturation_active;
-	int m, n;
 
-	dev_info(xcsc->xvip.dev,
+	xcsc_get_coeff(xcsc, K1);
+
+	dev_dbg(xcsc->xvip.dev,
 		"%s : Saturation = %d Saturation Active = %d",
 		__func__, sat, sat_act);
-	if (sat_act == sat)
-		return;
 
 	rwgt = 3086;
 	gwgt = 6094;
 	bwgt = 820;
 
-	/* Get current state of coefficients */
-	for (m = 0; m < XV_CSC_K_MAX_ROWS; m++) {
-		for (n = 0; n < XV_CSC_K_MAX_COLUMNS + 1; n++)
-			K1[m][n] = xcsc->k_hw[m][n];
-	}
-
-	a = ((((sat_act - sat) * rwgt) + (sat * XV_CSC_DIVISOR)) /
-					(XV_CSC_DIVISOR * sat_act));
-	b = (((sat_act - sat) * rwgt)/(XV_CSC_DIVISOR * sat_act));
+	b = (((sat_act - sat) * rwgt) / (sat_act));
+	a = b + ((sat * XV_CSC_DIVISOR) / (sat_act));
 	c = b;
 
-	d = (((sat_act - sat) * gwgt)/(XV_CSC_DIVISOR * sat_act));
-	e = ((((sat_act - sat) * gwgt) + (sat * XV_CSC_DIVISOR)) /
-					(XV_CSC_DIVISOR * sat_act));
+	d = (((sat_act - sat) * gwgt) / (sat_act));
+	e = d + ((sat * XV_CSC_DIVISOR) / (sat_act));
 	f = d;
 
-	g = (((sat_act - sat) * bwgt)/(XV_CSC_DIVISOR * sat_act));
+	g = (((sat_act - sat) * bwgt) / (sat_act));
 	h = g;
-	i = ((((sat_act - sat) * bwgt) + (sat * XV_CSC_DIVISOR)) /
-					(XV_CSC_DIVISOR * sat_act));
-	K2[0][0] = a * XV_CSC_SCALE_FACTOR;
-	K2[0][1] = b * XV_CSC_SCALE_FACTOR;
-	K3[0][2] = c * XV_CSC_SCALE_FACTOR;
-	K2[1][0] = d * XV_CSC_SCALE_FACTOR;
-	K2[1][1] = e * XV_CSC_SCALE_FACTOR;
-	K3[1][2] = f * XV_CSC_SCALE_FACTOR;
-	K2[2][0] = g * XV_CSC_SCALE_FACTOR;
-	K2[2][1] = h * XV_CSC_SCALE_FACTOR;
-	K3[2][2] = i * XV_CSC_SCALE_FACTOR;
+	i = g + ((sat * XV_CSC_DIVISOR) / (sat_act));
+
+	dev_dbg(xcsc->xvip.dev,
+		"a = %d b = %d c = %d\n", a, b, c);
+	dev_dbg(xcsc->xvip.dev,
+		"d = %d e = %d f = %d\n", d, e, f);
+	dev_dbg(xcsc->xvip.dev,
+		"g = %d h = %d i = %d\n", g, h, i);
+
+	K2[0][0] = (s32)(a);
+	K2[0][1] = (s32)(d);
+	K2[0][2] = (s32)(g);
+	K2[1][0] = (s32)(b);
+	K2[1][1] = (s32)(e);
+	K2[1][2] = (s32)(h);
+	K2[2][0] = (s32)(c);
+	K2[2][1] = (s32)(f);
+	K2[2][2] = (s32)(i);
 	K2[0][3] = 0;
 	K2[1][3] = 0;
 	K2[2][3] = 0;
 
+	dev_dbg(xcsc->xvip.dev,
+		"-------------CSC %s K2 dump ------------\n", __func__);
+	dev_dbg(xcsc->xvip.dev, "K2 R row : %5d  %5d  %5d\n",
+		K2[0][0],  K2[0][1],  K2[0][2]);
+	dev_dbg(xcsc->xvip.dev, "K2 G row : %5d  %5d  %5d\n",
+		K2[1][0],  K2[1][1],  K2[1][2]);
+	dev_dbg(xcsc->xvip.dev, "K2 B row : %5d  %5d  %5d\n",
+		K2[2][0],  K2[2][1],  K2[2][2]);
+	dev_dbg(xcsc->xvip.dev, "K2 Offset : %5d  %5d  %5d\n",
+		K2[0][3],  K2[1][3], K2[2][3]);
+	dev_dbg(xcsc->xvip.dev,
+		"\n-------------------------------------------------\n");
+
+	dev_dbg(xcsc->xvip.dev, "Before matrix multiply");
+	xcsc_print_k_hw(xcsc);
 	xcsc_matrix_multiply(K1, K2, xcsc->k_hw);
+	dev_dbg(xcsc->xvip.dev, "After matrix multiply");
+	xcsc_print_k_hw(xcsc);
+	xcsc->saturation_active = xcsc->saturation;
+	xcsc_write_coeff(xcsc);
 }
 
-static void xcsc_set_rgb_gain(struct xcsc_dev *xcsc)
+static void xcsc_set_red_gain(struct xcsc_dev *xcsc)
 {
 	/* Red Gain */
-	dev_info(xcsc->xvip.dev,
+	dev_dbg(xcsc->xvip.dev,
 		"%s: Red Gain %d Red Gain Active %d", __func__,
-		(xcsc->red_gain - 20)/2,
-		(xcsc->red_gain_active - 20)/2);
+		(xcsc->red_gain - 20) / 2,
+		(xcsc->red_gain_active - 20) / 2);
 
 	if (xcsc->red_gain != xcsc->red_gain_active) {
 		xcsc->k_hw[0][0] = ((xcsc->k_hw[0][0] *
@@ -348,11 +500,18 @@ static void xcsc_set_rgb_gain(struct xcsc_dev *xcsc)
 		xcsc->red_gain_active = xcsc->red_gain;
 	}
 
+	xcsc_write(xcsc, XV_CSC_K11, xcsc->k_hw[0][0], __func__);
+	xcsc_write(xcsc, XV_CSC_K12, xcsc->k_hw[0][1], __func__);
+	xcsc_write(xcsc, XV_CSC_K13, xcsc->k_hw[0][2], __func__);
+}
+
+static void xcsc_set_green_gain(struct xcsc_dev *xcsc)
+{
 	/* Green Gain */
-	dev_info(xcsc->xvip.dev,
+	dev_dbg(xcsc->xvip.dev,
 		"%s: Green Gain %d Green Gain Active %d", __func__,
-		(xcsc->green_gain - 20)/2,
-		(xcsc->green_gain_active - 20)/2);
+		 (xcsc->green_gain - 20) / 2,
+		 (xcsc->green_gain_active - 20) / 2);
 
 	if (xcsc->green_gain != xcsc->green_gain_active) {
 		xcsc->k_hw[1][0] = ((xcsc->k_hw[1][0] *
@@ -363,12 +522,18 @@ static void xcsc_set_rgb_gain(struct xcsc_dev *xcsc)
 			xcsc->green_gain) / xcsc->green_gain_active);
 		xcsc->green_gain_active = xcsc->green_gain;
 	}
+	xcsc_write(xcsc, XV_CSC_K21, xcsc->k_hw[1][0], __func__);
+	xcsc_write(xcsc, XV_CSC_K22, xcsc->k_hw[1][1], __func__);
+	xcsc_write(xcsc, XV_CSC_K23, xcsc->k_hw[1][2], __func__);
+}
 
+static void xcsc_set_blue_gain(struct xcsc_dev *xcsc)
+{
 	/* Blue Gain */
-	dev_info(xcsc->xvip.dev,
+	dev_dbg(xcsc->xvip.dev,
 		"%s: Blue Gain %d Blue Gain Active %d", __func__,
-		(xcsc->blue_gain - 20)/2,
-		(xcsc->blue_gain_active - 20)/2);
+		 (xcsc->blue_gain - 20) / 2,
+		 (xcsc->blue_gain_active - 20) / 2);
 
 	if (xcsc->blue_gain != xcsc->blue_gain_active) {
 		xcsc->k_hw[2][0] = ((xcsc->k_hw[2][0] *
@@ -379,62 +544,10 @@ static void xcsc_set_rgb_gain(struct xcsc_dev *xcsc)
 			xcsc->blue_gain) / xcsc->blue_gain_active);
 		xcsc->blue_gain_active = xcsc->blue_gain;
 	}
-}
 
-static int xcsc_set_coeff(struct xcsc_dev *xcsc)
-{
-	u32 color_in, color_out;
-	s32 clip_max, clamp_min;
-
-	if (!xcsc->probe_done)
-		return 0;
-
-	clamp_min = 0;
-	clip_max = ((1 << xcsc->color_depth)-1);
-
-	/* Set Brightness */
-	xcsc_set_brightness(xcsc);
-
-	/* Set Saturation */
-	xcsc_set_saturation(xcsc);
-
-	/* Set Contrast */
-	xcsc_set_contrast(xcsc);
-
-	/* Set RGB Gains */
-	xcsc_set_rgb_gain(xcsc);
-
-	/* Write In and Out Video Formats */
-	color_in = xcsc->formats[XVIP_PAD_SINK].code;
-	color_out = xcsc->formats[XVIP_PAD_SOURCE].code;
-	if (color_in != MEDIA_BUS_FMT_RBG888_1X24 &&
-			xcsc->cft_in != XVIDC_CSF_RGB) {
-		dev_err(xcsc->xvip.dev, "Unsupported sink pad media code");
-		xcsc->cft_in = XVIDC_CSF_RGB;
-		xcsc->formats[XVIP_PAD_SINK].code = MEDIA_BUS_FMT_RBG888_1X24;
-	}
-
-	if (color_out == MEDIA_BUS_FMT_RBG888_1X24)
-		xcsc->cft_out = XVIDC_CSF_RGB;
-	else if (color_out == MEDIA_BUS_FMT_VUY8_1X24) {
-		xcsc->cft_out = XVIDC_CSF_YCRCB_444;
-		xcsc_rgb_to_ycrcb(xcsc, &clamp_min, &clip_max);
-	} else {
-		dev_err(xcsc->xvip.dev, "Unsupported source pad media code");
-		xcsc->cft_out = XVIDC_CSF_RGB;
-		xcsc->formats[XVIP_PAD_SOURCE].code = MEDIA_BUS_FMT_RBG888_1X24;
-	}
-	xcsc_write(xcsc, XV_CSC_INVIDEOFORMAT, xcsc->cft_in);
-	xcsc_write(xcsc, XV_CSC_OUTVIDEOFORMAT, xcsc->cft_out);
-
-	/* Write Matrix Coeff */
-	xcsc_write_coeff(xcsc);
-
-	/* Write ClampMin and ClipMax */
-	xcsc_write(xcsc, XV_CSC_CLAMPMIN, clamp_min);
-	xcsc_write(xcsc, XV_CSC_CLIPMAX, clip_max);
-
-	return 0;
+	xcsc_write(xcsc, XV_CSC_K31, xcsc->k_hw[2][0], __func__);
+	xcsc_write(xcsc, XV_CSC_K32, xcsc->k_hw[2][1], __func__);
+	xcsc_write(xcsc, XV_CSC_K33, xcsc->k_hw[2][2], __func__);
 }
 
 static void xcsc_set_size(struct xcsc_dev *xcsc)
@@ -443,10 +556,10 @@ static void xcsc_set_size(struct xcsc_dev *xcsc)
 
 	width = xcsc->formats[XVIP_PAD_SINK].width;
 	height = xcsc->formats[XVIP_PAD_SINK].height;
-	dev_info(xcsc->xvip.dev, "%s : Setting width %d and height %d",
-			__func__, width, height);
-	xcsc_write(xcsc, XV_CSC_WIDTH, width);
-	xcsc_write(xcsc, XV_CSC_HEIGHT, height);
+	dev_dbg(xcsc->xvip.dev, "%s : Setting width %d and height %d",
+		__func__, width, height);
+	xcsc_write(xcsc, XV_CSC_WIDTH, width, __func__);
+	xcsc_write(xcsc, XV_CSC_HEIGHT, height, __func__);
 }
 
 static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
@@ -454,15 +567,24 @@ static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
 	struct xcsc_dev *xcsc = to_csc(subdev);
 
 	if (!enable) {
-		dev_info(xcsc->xvip.dev, "%s : Off", __func__);
-		xcsc_write(xcsc, XV_CSC_AP_CTRL, 0x0);
+		dev_dbg(xcsc->xvip.dev, "%s : Off", __func__);
+		/* Reset the Global IP Reset through PS GPIO */
+		gpiod_set_value_cansleep(xcsc->rst_gpio, 0x1);
+		usleep_range(150, 200);
+		gpiod_set_value_cansleep(xcsc->rst_gpio, 0x0);
+		usleep_range(150, 200);
+		/* Restore hw state */
+		xcsc_set_coeff(xcsc);
+		xcsc_set_size(xcsc);
 		return 0;
 	}
-	xcsc_set_coeff(xcsc);
-	xcsc_set_size(xcsc);
+	dev_dbg(xcsc->xvip.dev, "%s : On", __func__);
 
-	/* Start VPSS CSC Only  IP */
-	xcsc_write(xcsc, XV_CSC_AP_CTRL, 0x81);
+	xcsc_set_size(xcsc);
+	xcsc_set_coeff(xcsc);
+
+	/* Start VPSS CSC IP */
+	xcsc_write(xcsc, XV_CSC_AP_CTRL, 0x81, __func__);
 	return 0;
 }
 
@@ -471,8 +593,8 @@ static const struct v4l2_subdev_video_ops xcsc_video_ops = {
 };
 
 static int xcsc_get_format(struct v4l2_subdev *subdev,
-			struct v4l2_subdev_pad_config *cfg,
-			struct v4l2_subdev_format *fmt)
+			   struct v4l2_subdev_pad_config *cfg,
+			   struct v4l2_subdev_format *fmt)
 {
 	struct xcsc_dev *xcsc = to_csc(subdev);
 
@@ -481,28 +603,28 @@ static int xcsc_get_format(struct v4l2_subdev *subdev,
 }
 
 static int xcsc_set_format(struct v4l2_subdev *subdev,
-			struct v4l2_subdev_pad_config *cfg,
-			struct v4l2_subdev_format *fmt)
+			   struct v4l2_subdev_pad_config *cfg,
+			   struct v4l2_subdev_format *fmt)
 {
 	struct xcsc_dev *xcsc = to_csc(subdev);
 	struct v4l2_mbus_framefmt *__format;
-	struct v4l2_mbus_framefmt *__propogate;
+	struct v4l2_mbus_framefmt *__propagate;
 
 	__format = __xcsc_get_pad_format(xcsc, cfg, fmt->pad, fmt->which);
+	/* Propagate to Source Pad */
+	__propagate = __xcsc_get_pad_format(xcsc, cfg,
+					    XVIP_PAD_SOURCE, fmt->which);
 	*__format = fmt->format;
 
 	if (fmt->pad == XVIP_PAD_SINK) {
 		if (fmt->format.code != MEDIA_BUS_FMT_RBG888_1X24)
-			dev_err(xcsc->xvip.dev, "Not supported Sink Format");
+			dev_err(xcsc->xvip.dev, "Not supported Sink Media Format");
 		xcsc->cft_in = XVIDC_CSF_RGB;
 		__format->code = MEDIA_BUS_FMT_RBG888_1X24;
 
-		/* Propogate to Source Pad */
-		__propogate = __xcsc_get_pad_format(xcsc, cfg,
-					XVIP_PAD_SOURCE, fmt->which);
 	} else if (fmt->pad == XVIP_PAD_SOURCE) {
-		if ((fmt->format.code != MEDIA_BUS_FMT_VUY8_1X24)
-			&& (fmt->format.code != MEDIA_BUS_FMT_RBG888_1X24)) {
+		if ((fmt->format.code != MEDIA_BUS_FMT_VUY8_1X24) &&
+		    (fmt->format.code != MEDIA_BUS_FMT_RBG888_1X24)) {
 			dev_err(xcsc->xvip.dev, "Not supported Source Format");
 			xcsc->cft_out = XVIDC_CSF_RGB;
 			__format->code = MEDIA_BUS_FMT_RBG888_1X24;
@@ -513,17 +635,14 @@ static int xcsc_set_format(struct v4l2_subdev *subdev,
 				xcsc->cft_out = XVIDC_CSF_YCRCB_444;
 		}
 
-		/* Propogate to Sink Pad */
-		__propogate = __xcsc_get_pad_format(xcsc, cfg,
-					XVIP_PAD_SOURCE, fmt->which);
 	} else {
 		/* Should never get here */
 		dev_err(xcsc->xvip.dev, "Undefined media pad");
 		return -EINVAL;
 	}
 
-	__propogate->width  = __format->width;
-	__propogate->height = __format->height;
+	__propagate->width  = __format->width;
+	__propagate->height = __format->height;
 
 	fmt->format = *__format;
 	return 0;
@@ -543,34 +662,39 @@ static const struct v4l2_subdev_ops xcsc_ops = {
 
 static int xcsc_s_ctrl(struct v4l2_ctrl *ctrl)
 {
-	int rval;
 	struct xcsc_dev *xcsc = container_of(ctrl->handler,
 					struct xcsc_dev,
 					ctrl_handler);
 
-	dev_info(xcsc->xvip.dev, "%s  called", __func__);
+	dev_dbg(xcsc->xvip.dev, "%s  called", __func__);
 	switch (ctrl->id) {
 	case V4L2_CID_XILINX_CSC_BRIGHTNESS:
 		xcsc->brightness = (2 * ctrl->val) + 20;
+		xcsc_set_brightness(xcsc);
 		break;
 	case V4L2_CID_XILINX_CSC_SATURATION:
 		xcsc->saturation = ((ctrl->val == 0) ? 1 : ctrl->val * 2);
+		xcsc_set_saturation(xcsc);
 		break;
 	case V4L2_CID_XILINX_CSC_CONTRAST:
 		xcsc->contrast = (4 * ctrl->val) - 200;
+		xcsc_set_contrast(xcsc);
 		break;
 	case V4L2_CID_XILINX_CSC_RED_GAIN:
 		xcsc->red_gain =  (2 * ctrl->val) + 20;
+		xcsc_set_red_gain(xcsc);
 		break;
 	case V4L2_CID_XILINX_CSC_BLUE_GAIN:
 		xcsc->blue_gain =  (2 * ctrl->val) + 20;
+		xcsc_set_blue_gain(xcsc);
 		break;
 	case V4L2_CID_XILINX_CSC_GREEN_GAIN:
 		xcsc->green_gain =  (2 * ctrl->val) + 20;
+		xcsc_set_green_gain(xcsc);
 		break;
 	}
-	rval = xcsc_set_coeff(xcsc);
-	return rval;
+	xcsc_print_coeff(xcsc);
+	return 0;
 }
 
 static const struct v4l2_ctrl_ops xcsc_ctrl_ops = {
@@ -653,7 +777,7 @@ static struct v4l2_ctrl_config xcsc_ctrls[] = {
 };
 
 static int xcsc_open(struct v4l2_subdev *subdev,
-			struct v4l2_subdev_fh *fh)
+		     struct v4l2_subdev_fh *fh)
 {
 	struct xcsc_dev *xcsc = to_csc(subdev);
 	struct v4l2_mbus_framefmt *format;
@@ -669,7 +793,7 @@ static int xcsc_open(struct v4l2_subdev *subdev,
 }
 
 static int xcsc_close(struct v4l2_subdev *subdev,
-			struct v4l2_subdev_fh *fh)
+		      struct v4l2_subdev_fh *fh)
 {
 	return 0;
 }
@@ -693,22 +817,21 @@ static int xcsc_parse_of(struct xcsc_dev *xcsc)
 	u32 port_id = 0;
 
 	ports = of_get_child_by_name(node, "ports");
-	if (ports == NULL)
+	if (!ports)
 		ports = node;
 
 	/* Get the format description for each pad */
 	for_each_child_of_node(ports, port) {
-		dev_info(xcsc->xvip.dev, "Port name %s", port->name);
 		if (port->name && (of_node_cmp(port->name, "port") == 0)) {
 			vip_format = xvip_of_get_format(port);
 			if (IS_ERR(vip_format)) {
-				dev_err(dev, "Invalid format in DT");
+				dev_err(dev, "Invalid media pad format in DT");
 				return PTR_ERR(vip_format);
 			}
 
 			rval = of_property_read_u32(port, "reg", &port_id);
 			if (rval < 0) {
-				dev_err(dev, "No reg in DT");
+				dev_err(dev, "No reg in DT to specify pad");
 				return rval;
 			}
 
@@ -716,9 +839,15 @@ static int xcsc_parse_of(struct xcsc_dev *xcsc)
 				dev_err(dev, "Invalid reg in DT");
 				return -EINVAL;
 			}
-			dev_info(xcsc->xvip.dev, "Port ID = %d", port_id);
 			xcsc->vip_formats[port_id] = vip_format;
 		}
+	}
+	/* Reset GPIO */
+	xcsc->rst_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(xcsc->rst_gpio)) {
+		if (PTR_ERR(xcsc->rst_gpio) != -EPROBE_DEFER)
+			dev_err(dev, "Reset GPIO not setup in DT");
+		return PTR_ERR(xcsc->rst_gpio);
 	}
 	return 0;
 }
@@ -730,7 +859,7 @@ static int xcsc_probe(struct platform_device *pdev)
 	struct v4l2_mbus_framefmt *def_fmt;
 	int rval, itr;
 
-	dev_info(&pdev->dev, "VPSS CSC Only Probe Started");
+	dev_dbg(&pdev->dev, "VPSS CSC Probe Started");
 	xcsc = devm_kzalloc(&pdev->dev, sizeof(*xcsc), GFP_KERNEL);
 	if (!xcsc)
 		return -ENOMEM;
@@ -741,7 +870,14 @@ static int xcsc_probe(struct platform_device *pdev)
 	if (rval < 0)
 		return rval;
 
+	/* Reset and initialize the core */
+	dev_dbg(xcsc->xvip.dev, "Reset VPSS CSC");
+	/* Use GPIO to bring IP out of reset */
+	gpiod_set_value_cansleep(xcsc->rst_gpio, 0x0);
+	usleep_range(150, 200);
+
 	rval = xvip_init_resources(&xcsc->xvip);
+
 	if (rval < 0)
 		return rval;
 
@@ -755,28 +891,40 @@ static int xcsc_probe(struct platform_device *pdev)
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
 	/* Default Formats Initialization */
-	xcsc_set_default_state(xcsc);
 	def_fmt = &xcsc->default_formats[XVIP_PAD_SINK];
 	def_fmt->code = xcsc->vip_formats[XVIP_PAD_SINK]->code;
 	/* Sink only supports RGB888 */
 	if (xcsc->vip_formats[XVIP_PAD_SINK]->code !=
-				MEDIA_BUS_FMT_RBG888_1X24)
+				MEDIA_BUS_FMT_RBG888_1X24) {
 		def_fmt->code = MEDIA_BUS_FMT_RBG888_1X24;
+		xcsc->cft_in = XVIDC_CSF_RGB;
+	}
 	def_fmt->field = V4L2_FIELD_NONE;
 	def_fmt->colorspace = V4L2_COLORSPACE_SRGB;
 	def_fmt->width = XV_CSC_DEFAULT_WIDTH;
 	def_fmt->height = XV_CSC_DEFAULT_HEIGHT;
 	xcsc->formats[XVIP_PAD_SINK] = *def_fmt;
 
+	/* Source supports only YUV 444 or RGB 888 */
 	def_fmt = &xcsc->default_formats[XVIP_PAD_SOURCE];
 	*def_fmt = xcsc->default_formats[XVIP_PAD_SINK];
 	def_fmt->code = xcsc->vip_formats[XVIP_PAD_SOURCE]->code;
+	if (def_fmt->code == MEDIA_BUS_FMT_VUY8_1X24) {
+		xcsc->cft_out = XVIDC_CSF_YCRCB_444;
+	} else if (def_fmt->code == MEDIA_BUS_FMT_RBG888_1X24) {
+		xcsc->cft_out = XVIDC_CSF_RGB;
+	} else {
+		/* Default to RGB */
+		xcsc->cft_out = XVIDC_CSF_RGB;
+		def_fmt->code = MEDIA_BUS_FMT_RBG888_1X24;
+	}
 	def_fmt->width = XV_CSC_DEFAULT_WIDTH;
 	def_fmt->height = XV_CSC_DEFAULT_HEIGHT;
 	xcsc->formats[XVIP_PAD_SOURCE] = *def_fmt;
 
 	xcsc->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	xcsc->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
+	xcsc_set_default_state(xcsc);
 
 	/* Init Media Entity */
 	subdev->entity.ops = &xcsc_media_ops;
@@ -787,7 +935,7 @@ static int xcsc_probe(struct platform_device *pdev)
 	v4l2_ctrl_handler_init(&xcsc->ctrl_handler, ARRAY_SIZE(xcsc_ctrls));
 	for (itr = 0; itr < ARRAY_SIZE(xcsc_ctrls); itr++) {
 		v4l2_ctrl_new_custom(&xcsc->ctrl_handler,
-				&xcsc_ctrls[itr], NULL);
+				     &xcsc_ctrls[itr], NULL);
 	}
 	if (xcsc->ctrl_handler.error) {
 		dev_err(&pdev->dev, "Failed to add  v4l2 controls");
@@ -807,8 +955,7 @@ static int xcsc_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to register subdev\n");
 		goto ctrl_error;
 	}
-	dev_info(&pdev->dev, "VPSS CSC Only Probe Successful");
-	xcsc->probe_done = true;
+	dev_info(&pdev->dev, "VPSS CSC Probe Successful");
 	return 0;
 ctrl_error:
 	v4l2_ctrl_handler_free(&xcsc->ctrl_handler);
@@ -831,7 +978,7 @@ static int xcsc_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id xcsc_of_id_table[] = {
-	{.compatible = "xlnx,v-vpss-csc-only"},
+	{.compatible = "xlnx,v-vpss-csc"},
 	{ }
 };
 
@@ -839,7 +986,7 @@ MODULE_DEVICE_TABLE(of, xcsc_of_id_table);
 
 static struct platform_driver xcsc_driver = {
 	.driver = {
-		.name = "xilinx-csc",
+		.name = "xilinx-vpss-csc",
 		.of_match_table = xcsc_of_id_table,
 	},
 	.probe = xcsc_probe,
@@ -847,5 +994,5 @@ static struct platform_driver xcsc_driver = {
 };
 
 module_platform_driver(xcsc_driver);
-MODULE_DESCRIPTION("Xilinx VPSS CSC Only Driver");
+MODULE_DESCRIPTION("Xilinx VPSS CSC Driver");
 MODULE_LICENSE("GPL v2");

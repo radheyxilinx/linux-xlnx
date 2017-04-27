@@ -8,7 +8,9 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/delay.h>
 #include <linux/device.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -19,7 +21,7 @@
 #include <media/v4l2-subdev.h>
 
 #include "xilinx-vip.h"
-#include "xilinx-hls-gamma.h"
+#include "xilinx-gamma.h"
 #include "xilinx-gamma-coeff.h"
 
 #define XGAMMA_LUT_LENGTH	(128)
@@ -30,6 +32,9 @@
 #define XGAMMA_MAX_WIDTH	(3840)
 #define XGAMMA_DEF_WIDTH	(1280)
 
+#define XGAMMA_POWER_ON		(0)
+#define XGAMMA_POWER_OFF	(1)
+
 enum xgamma_video_format {
 	XGAMMA_RGB = 0,
 };
@@ -39,14 +44,14 @@ struct xgamma_dev {
 	struct media_pad pads[2];
 	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_formats[2];
-	const struct xvip_video_format *vip_formats[2];
 	struct v4l2_ctrl_handler ctrl_handler;
 
 	enum xgamma_video_format vid_fmt;
-	const uint8_t *red_lut;
-	const uint8_t *green_lut;
-	const uint8_t *blue_lut;
-	bool  probe_done;
+	const u8 *red_lut;
+	const u8 *green_lut;
+	const u8 *blue_lut;
+
+	struct gpio_desc *rst_gpio;
 };
 
 static inline u32 xg_read(struct xgamma_dev *xg, u32 reg)
@@ -69,7 +74,8 @@ static inline void xg_write(struct xgamma_dev *xg, u32 reg, u32 data)
 	rb = xg_read(xg, reg);
 	if (rb != data) {
 		dev_dbg(xg->xvip.dev,
-		"Wrote 0x%x does not match read back 0x%x", data, rb);
+			"Wrote 0x%x does not match read back 0x%x",
+			data, rb);
 	}
 }
 
@@ -80,8 +86,8 @@ static inline struct xgamma_dev *to_xg(struct v4l2_subdev *subdev)
 
 static struct v4l2_mbus_framefmt *
 __xg_get_pad_format(struct xgamma_dev *xg,
-			struct v4l2_subdev_pad_config *cfg,
-			unsigned int pad, u32 which)
+		    struct v4l2_subdev_pad_config *cfg,
+		    unsigned int pad, u32 which)
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
@@ -100,22 +106,18 @@ static void xg_set_default_state(struct xgamma_dev *xg)
 }
 
 static void xg_set_lut_entries(struct xgamma_dev *xg,
-	const uint8_t *lut,
-	const u32 lut_base, const char *component)
+			       const u8 *lut, const u32 lut_base,
+			       const char *component)
 {
 	int itr;
 	u32 lut_offset, lut_data;
 
-	if (!xg->probe_done)
-		return;
-
 	lut_offset = lut_base;
 	/* Write LUT Entries */
 	for (itr = 0; itr < XGAMMA_LUT_LENGTH; itr++) {
-		lut_data = (lut[2*itr+1] << 16) | lut[2*itr];
+		lut_data = (lut[2 * itr + 1] << 16) | lut[2 * itr];
 		xg_write(xg, lut_offset, lut_data);
 		lut_offset += 4;
-
 	}
 }
 
@@ -124,24 +126,26 @@ static int xg_s_stream(struct v4l2_subdev *subdev, int enable)
 	struct xgamma_dev *xg = to_xg(subdev);
 
 	if (!enable) {
-		dev_info(xg->xvip.dev, "%s : Off", __func__);
-		xg_write(xg, XGAMMA_AP_CTRL, 0);
+		dev_dbg(xg->xvip.dev, "%s : Off", __func__);
+		gpiod_set_value_cansleep(xg->rst_gpio, XGAMMA_POWER_OFF);
+		usleep_range(100, 150);
+		gpiod_set_value_cansleep(xg->rst_gpio, XGAMMA_POWER_ON);
 		return 0;
 	}
-	dev_info(xg->xvip.dev, "%s : Started", __func__);
+	dev_dbg(xg->xvip.dev, "%s : Started", __func__);
 
-	dev_info(xg->xvip.dev, "%s : Setting width %d and height %d",
+	dev_dbg(xg->xvip.dev, "%s : Setting width %d and height %d",
 		__func__, xg->formats[XVIP_PAD_SINK].width,
 		xg->formats[XVIP_PAD_SINK].height);
 	xg_write(xg, XGAMMA_WIDTH, xg->formats[XVIP_PAD_SINK].width);
 	xg_write(xg, XGAMMA_HEIGHT, xg->formats[XVIP_PAD_SINK].height);
 	xg_write(xg, XGAMMA_VIDEO_FORMAT, xg->vid_fmt);
 	xg_set_lut_entries(xg, xg->red_lut,
-				XGAMMA_GAMMA_LUT_0_BASE, "Red");
+			   XGAMMA_GAMMA_LUT_0_BASE, "Red");
 	xg_set_lut_entries(xg, xg->green_lut,
-				XGAMMA_GAMMA_LUT_1_BASE, "Green");
+			   XGAMMA_GAMMA_LUT_1_BASE, "Green");
 	xg_set_lut_entries(xg, xg->blue_lut,
-				XGAMMA_GAMMA_LUT_2_BASE, "Blue");
+			   XGAMMA_GAMMA_LUT_2_BASE, "Blue");
 
 	/* Start GAMMA Correction LUT Video IP */
 	xg_write(xg, XGAMMA_AP_CTRL, 0X81);
@@ -153,8 +157,8 @@ static const struct v4l2_subdev_video_ops xg_video_ops = {
 };
 
 static int xg_get_format(struct v4l2_subdev *subdev,
-			struct v4l2_subdev_pad_config *cfg,
-			struct v4l2_subdev_format *fmt)
+			 struct v4l2_subdev_pad_config *cfg,
+			 struct v4l2_subdev_format *fmt)
 {
 	struct xgamma_dev *xg = to_xg(subdev);
 
@@ -163,8 +167,8 @@ static int xg_get_format(struct v4l2_subdev *subdev,
 }
 
 static int xg_set_format(struct v4l2_subdev *subdev,
-			struct v4l2_subdev_pad_config *cfg,
-			struct v4l2_subdev_format *fmt)
+			 struct v4l2_subdev_pad_config *cfg,
+			 struct v4l2_subdev_format *fmt)
 {
 	struct xgamma_dev *xg = to_xg(subdev);
 	struct v4l2_mbus_framefmt *__format;
@@ -175,8 +179,7 @@ static int xg_set_format(struct v4l2_subdev *subdev,
 	if (fmt->pad == XVIP_PAD_SINK) {
 		if (__format->code != MEDIA_BUS_FMT_RBG888_1X24) {
 			dev_err(xg->xvip.dev,
-			"%s : Not a supported sink media bus code format",
-			__func__);
+				"Unsupported sink media bus code format");
 			__format->code = MEDIA_BUS_FMT_RBG888_1X24;
 		}
 	}
@@ -186,7 +189,7 @@ static int xg_set_format(struct v4l2_subdev *subdev,
 					XGAMMA_MIN_HEIGHT, XGAMMA_MAX_HEIGHT);
 
 	fmt->format = *__format;
-	/* Propogate to Source Pad */
+	/* Propagate to Source Pad */
 	__format = __xg_get_pad_format(xg, cfg, XVIP_PAD_SOURCE, fmt->which);
 	*__format = fmt->format;
 	return 0;
@@ -230,7 +233,6 @@ static const struct v4l2_subdev_ops xg_ops = {
 static int
 select_gamma(s32 value, const uint8_t **coeff)
 {
-
 	if (!coeff)
 		return -EINVAL;
 	if (value <= 0 || value > GAMMA_CURVE_LENGTH)
@@ -243,10 +245,10 @@ select_gamma(s32 value, const uint8_t **coeff)
 static int xg_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	int rval;
-	struct xgamma_dev *xg = container_of(ctrl->handler,
-					struct xgamma_dev,
-					ctrl_handler);
-	dev_info(xg->xvip.dev, "%s called", __func__);
+	struct xgamma_dev *xg =
+		container_of(ctrl->handler,
+			     struct xgamma_dev, ctrl_handler);
+	dev_dbg(xg->xvip.dev, "%s called", __func__);
 	switch (ctrl->id) {
 	case V4L2_CID_XILINX_GAMMA_CORR_RED_GAMMA:
 		rval = select_gamma(ctrl->val, &xg->red_lut);
@@ -254,10 +256,10 @@ static int xg_s_ctrl(struct v4l2_ctrl *ctrl)
 			dev_err(xg->xvip.dev, "Invalid Red Gamma");
 			return rval;
 		}
-		dev_info(xg->xvip.dev, "%s: Setting Red Gamma to %d.%d",
-					__func__, ctrl->val/10, ctrl->val%10);
+		dev_dbg(xg->xvip.dev, "%s: Setting Red Gamma to %d.%d",
+			__func__, ctrl->val / 10, ctrl->val % 10);
 		xg_set_lut_entries(xg, xg->red_lut,
-			XGAMMA_GAMMA_LUT_0_BASE, "Red");
+				   XGAMMA_GAMMA_LUT_0_BASE, "Red");
 		break;
 	case V4L2_CID_XILINX_GAMMA_CORR_BLUE_GAMMA:
 		rval = select_gamma(ctrl->val, &xg->blue_lut);
@@ -265,10 +267,10 @@ static int xg_s_ctrl(struct v4l2_ctrl *ctrl)
 			dev_err(xg->xvip.dev, "Invalid Blue Gamma");
 			return rval;
 		}
-		dev_info(xg->xvip.dev, "%s: Setting Blue Gamma to %d.%d",
-					__func__, ctrl->val/10, ctrl->val%10);
+		dev_dbg(xg->xvip.dev, "%s: Setting Blue Gamma to %d.%d",
+			__func__, ctrl->val / 10, ctrl->val % 10);
 		xg_set_lut_entries(xg, xg->blue_lut,
-			XGAMMA_GAMMA_LUT_1_BASE, "Blue");
+				   XGAMMA_GAMMA_LUT_1_BASE, "Blue");
 		break;
 	case V4L2_CID_XILINX_GAMMA_CORR_GREEN_GAMMA:
 		rval = select_gamma(ctrl->val, &xg->green_lut);
@@ -276,10 +278,10 @@ static int xg_s_ctrl(struct v4l2_ctrl *ctrl)
 			dev_err(xg->xvip.dev, "Invalid Green Gamma");
 			return -EINVAL;
 		}
-		dev_info(xg->xvip.dev, "%s: Setting Green Gamma to %d.%d",
-					__func__, ctrl->val/10, ctrl->val%10);
+		dev_dbg(xg->xvip.dev, "%s: Setting Green Gamma to %d.%d",
+			__func__, ctrl->val / 10, ctrl->val % 10);
 		xg_set_lut_entries(xg, xg->green_lut,
-			XGAMMA_GAMMA_LUT_2_BASE, "Green");
+				   XGAMMA_GAMMA_LUT_2_BASE, "Green");
 			break;
 	}
 	return 0;
@@ -336,35 +338,35 @@ static int xg_parse_of(struct xgamma_dev *xg)
 {
 	struct device *dev = xg->xvip.dev;
 	struct device_node *node = dev->of_node;
-	const struct xvip_video_format *vip_format;
 	struct device_node *ports;
 	struct device_node *port;
 	u32 port_id = 0;
 	int rval;
 
 	ports = of_get_child_by_name(node, "ports");
-	if (ports == NULL)
+	if (!ports)
 		ports = node;
+
 	/* Get the format description for each pad */
 	for_each_child_of_node(ports, port) {
 		if (port->name && (of_node_cmp(port->name, "port") == 0)) {
-			vip_format = xvip_of_get_format(port);
-			if (IS_ERR(vip_format)) {
-				dev_err(dev, "Invalid format in DT");
-				return PTR_ERR(vip_format);
-			}
 			rval = of_property_read_u32(port, "reg", &port_id);
 			if (rval < 0) {
 				dev_err(dev, "No reg in DT");
 				return rval;
 			}
-
 			if (port_id != 0 && port_id != 1) {
 				dev_err(dev, "Invalid reg in DT");
 				return -EINVAL;
 			}
-			xg->vip_formats[port_id] = vip_format;
 		}
+	}
+
+	xg->rst_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(xg->rst_gpio)) {
+		if (PTR_ERR(xg->rst_gpio) != -EPROBE_DEFER)
+			dev_err(dev, "Reset GPIO not setup in DT");
+		return PTR_ERR(xg->rst_gpio);
 	}
 	return 0;
 }
@@ -376,7 +378,7 @@ static int xg_probe(struct platform_device *pdev)
 	struct v4l2_mbus_framefmt *def_fmt;
 	int rval, itr;
 
-	dev_info(&pdev->dev, "Gamma LUT Probe Started");
+	dev_dbg(&pdev->dev, "Gamma LUT Probe Started");
 	xg = devm_kzalloc(&pdev->dev, sizeof(*xg), GFP_KERNEL);
 	if (!xg)
 		return -ENOMEM;
@@ -385,6 +387,10 @@ static int xg_probe(struct platform_device *pdev)
 	if (rval < 0)
 		return rval;
 	rval = xvip_init_resources(&xg->xvip);
+
+	dev_dbg(xg->xvip.dev, "Reset Xilinx Video Gamma Corrrection");
+	gpiod_set_value_cansleep(xg->rst_gpio, XGAMMA_POWER_ON);
+	usleep_range(100, 150);
 
 	/* Init V4L2 subdev */
 	subdev = &xg->xvip.subdev;
@@ -398,11 +404,7 @@ static int xg_probe(struct platform_device *pdev)
 	xg_set_default_state(xg);
 	def_fmt = &xg->default_formats[XVIP_PAD_SINK];
 	/* GAMMA LUT IP only to be supported for RGB */
-	if (xg->vip_formats[XVIP_PAD_SINK]->code ==
-				MEDIA_BUS_FMT_RBG888_1X24)
-		def_fmt->code = xg->vip_formats[XVIP_PAD_SINK]->code;
-	else
-		def_fmt->code = MEDIA_BUS_FMT_RBG888_1X24;
+	def_fmt->code = MEDIA_BUS_FMT_RBG888_1X24;
 	def_fmt->field = V4L2_FIELD_NONE;
 	def_fmt->colorspace = V4L2_COLORSPACE_SRGB;
 	def_fmt->width = XGAMMA_DEF_WIDTH;
@@ -426,7 +428,7 @@ static int xg_probe(struct platform_device *pdev)
 	v4l2_ctrl_handler_init(&xg->ctrl_handler, ARRAY_SIZE(xg_ctrls));
 	for (itr = 0; itr < ARRAY_SIZE(xg_ctrls); itr++) {
 		v4l2_ctrl_new_custom(&xg->ctrl_handler,
-			&xg_ctrls[itr], NULL);
+				     &xg_ctrls[itr], NULL);
 	}
 	if (xg->ctrl_handler.error) {
 		dev_err(&pdev->dev, "Failed to add V4L2 controls");
@@ -446,9 +448,7 @@ static int xg_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to register subdev");
 		goto v4l2_subdev_error;
 	}
-	xg->probe_done = true;
-	dev_info(&pdev->dev,
-		"%s : GAMMA Correction LUT Successful", __func__);
+	dev_info(&pdev->dev, "Xilinx Video Gamma Correction LUT registered");
 	return 0;
 ctrl_error:
 	v4l2_ctrl_handler_free(&xg->ctrl_handler);
@@ -458,7 +458,6 @@ media_error:
 	xvip_cleanup_resources(&xg->xvip);
 	return rval;
 }
-
 
 static int xg_remove(struct platform_device *pdev)
 {
@@ -480,7 +479,7 @@ MODULE_DEVICE_TABLE(of, xg_of_id_table);
 
 static struct platform_driver xg_driver = {
 	.driver = {
-		.name = "xilinx-gamma-lut-v1.0",
+		.name = "xilinx-gamma-lut",
 		.of_match_table = xg_of_id_table,
 	},
 	.probe = xg_probe,
@@ -489,5 +488,5 @@ static struct platform_driver xg_driver = {
 };
 
 module_platform_driver(xg_driver);
-MODULE_DESCRIPTION("Xilinx Gamma Correction LUT Driver");
+MODULE_DESCRIPTION("Xilinx Video Gamma Correction LUT Driver");
 MODULE_LICENSE("GPL v2");

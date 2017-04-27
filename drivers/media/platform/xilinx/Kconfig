@@ -43,12 +43,6 @@ config VIDEO_XILINX_SCALER
 	---help---
 	   Driver for the Xilinx Video Scaler
 
-config VIDEO_XILINX_SCALER_HLS_VPSS
-	tristate "Xilinx Video VPSS Scaler only"
-	depends on VIDEO_XILINX
-	---help---
-	   Driver for Xilin xHLS  VPSS Scaler only
-
 config VIDEO_XILINX_SWITCH
 	tristate "Xilinx Video Switch"
 	depends on VIDEO_XILINX
@@ -74,22 +68,28 @@ config VIDEO_XILINX_CSI2RXSS
 	---help---
 	Driver for Xilinx MIPI CSI2 Rx Subsystem
 
-config VIDEO_XILINX_HLS_DEMOSAIC
-	tristate "Xilinx Demosaic IP (HLS)"
+config VIDEO_XILINX_DEMOSAIC
+	tristate "Xilinx Video Demosaic IP"
 	depends on VIDEO_XILINX
 	---help---
-	Driver for Xilinx Video Demosaic IP(HLS)
+	Driver for Xilinx Video Demosaic IP
 
-config VIDEO_XILINX_HLS_GAMMA
-	tristate "Xilinx Gamma Correction LUT (HLS)"
+config VIDEO_XILINX_GAMMA
+	tristate "Xilinx Gamma Correction LUT"
 	depends on VIDEO_XILINX
 	---help---
-	Driver for Xilinx Gamma Correction LUT HLS IP
+	Driver for Xilinx Gamma Correction LUT IP
 
 config VIDEO_XILINX_VPSS_CSC
-	tristate "Xilinx VPSS CSC Only"
+	tristate "Xilinx VPSS CSC"
 	depends on VIDEO_XILINX
 	---help---
-	Driver for the Xilinx VPSS Color Space Conversion Only (HLS)
+	Driver for the Xilinx VPSS Color Space Conversion
+
+config VIDEO_XILINX_VPSS_SCALER
+	tristate "Xilinx Video VPSS Scaler"
+	depends on VIDEO_XILINX
+	---help---
+	Driver for Xilinx VPSS Scaler only
 
 endif #VIDEO_XILINX

@@ -8,8 +8,8 @@
  * published by the Free Software Foundation.
  */
 
-#define GAMMA_BPC_8			(8)
-#define GAMMA_TABLE_LENGTH	(1 << GAMMA_BPC_8)
+#define GAMMA_BPC_8		(8)
+#define GAMMA_TABLE_LENGTH	BIT(GAMMA_BPC_8)
 #define GAMMA_CURVE_LENGTH	(40)
 
 const u8 xgamma_01[GAMMA_TABLE_LENGTH] = {
@@ -992,7 +992,6 @@ const u8 xgamma_28[GAMMA_TABLE_LENGTH] = {
 236, 239, 241, 244, 247, 249, 252, 255,
 };
 
-
 const u8 xgamma_29[GAMMA_TABLE_LENGTH] = {
 0, 0, 0, 0, 0, 0, 0, 0,
 0, 0, 0, 0, 0, 0, 0, 0,
@@ -1413,7 +1412,7 @@ const u8 xgamma_40[GAMMA_TABLE_LENGTH] = {
 228, 232, 236, 239, 243, 247, 251, 255,
 };
 
-const uint8_t *xgamma_curves[GAMMA_CURVE_LENGTH] =  {
+const u8 *xgamma_curves[GAMMA_CURVE_LENGTH] =  {
 	&xgamma_01[0],
 	&xgamma_02[0],
 	&xgamma_03[0],

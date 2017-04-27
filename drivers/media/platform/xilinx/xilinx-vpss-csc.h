@@ -178,6 +178,8 @@
  * COH = Clear on Handshake)
  */
 
+#include <linux/bitops.h>
+
 #define XV_CSC_AP_CTRL					(0x000)
 #define XV_CSC_INVIDEOFORMAT				(0x010)
 #define XV_CSC_OUTVIDEOFORMAT				(0x018)
@@ -199,7 +201,8 @@
 #define XV_CSC_CLIPMAX					(0x0b8)
 
 #define XV_CSC_FRACTIONAL_BITS	(12)
-#define XV_CSC_SCALE_FACTOR	(1 << XV_CSC_FRACTIONAL_BITS)
+#define XV_CSC_SCALE_FACTOR	(4096)
+#define XV_CSC_RGB_OFFSET_WR(x)	(((x) >> 12) & 0x3FF)
 #define XV_CSC_DIVISOR		(10000)
 #define XV_CSC_DEFAULT_HEIGHT	(720)
 #define XV_CSC_DEFAULT_WIDTH	(1280)
