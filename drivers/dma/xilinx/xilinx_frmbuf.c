@@ -494,9 +494,13 @@ static void xilinx_frmbuf_halt(struct xilinx_frmbuf_chan *chan)
  */
 static void xilinx_frmbuf_start(struct xilinx_frmbuf_chan *chan)
 {
-	frmbuf_set(chan, XILINX_FRMBUF_CTRL_OFFSET,
-			XILINX_FRMBUF_CTRL_AP_START |
-			XILINX_FRMBUF_CTRL_AUTO_RESTART);
+	if (chan->direction == DMA_MEM_TO_DEV)
+		frmbuf_set(chan, XILINX_FRMBUF_CTRL_OFFSET,
+				XILINX_FRMBUF_CTRL_AP_START |
+				XILINX_FRMBUF_CTRL_AUTO_RESTART);
+	else
+		frmbuf_set(chan, XILINX_FRMBUF_CTRL_OFFSET,
+				XILINX_FRMBUF_CTRL_AP_START);
 }
 
 /**
